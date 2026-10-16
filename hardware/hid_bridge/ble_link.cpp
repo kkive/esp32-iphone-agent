@@ -8,6 +8,7 @@
 // reply or an ATT write response never queues behind more than ~2 KB of video. It also leaves MBUF_RESERVE host
 // blocks free, and never sends while a reply or status is waiting.
 #include "ble_link.h"
+#include "ble_hid.h"
 #include <atomic>
 #include <NimBLEDevice.h>
 #include "nimble/nimble/host/include/host/ble_hs.h"
@@ -29,8 +30,9 @@ const int MBUF_RESERVE = 16;               // of 64 msys blocks; video never tak
 const int VIDEO_CTRL_PKTS = 8;             // ACL packets video may have in the controller while commands flow
 const uint32_t CMD_ACTIVE_MS = 1000;       // ... i.e. for this long after a `cmd` write; otherwise all of them
 const int MBUF_DATA = MYNEWT_VAL(MSYS_1_BLOCK_SIZE) - 16;  // payload per block (16 B mbuf header)
-// Up to MAX_PEERS centrals at once: the phone's app, plus a Mac as a debug harness.
-const int MAX_PEERS = 2;
+// Up to MAX_PEERS centrals at once (sdkconfig allows 3): the phone's app, the phone's HID stack
+// (Bluetooth mouse, no cable), plus a Mac as a debug harness.
+const int MAX_PEERS = 3;
 
 enum { CH_REPLY, CH_STATUS, CH_VIDEO, CH_COUNT };
 
@@ -46,7 +48,7 @@ static SemaphoreHandle_t statusLock;
 static Text statusText;
 static bool statusDirty;
 static std::atomic<int> ctrlPending;  // replies queued or sending + a status waiting; video yields to them
-static volatile int peers[MAX_PEERS] = {-1, -1};
+static volatile int peers[MAX_PEERS] = {-1, -1, -1};
 static volatile bool subscribed[MAX_PEERS][CH_COUNT];
 static uint32_t winStart, winBytes;  // touched by the video task only
 static volatile uint32_t kbps;
@@ -275,12 +277,14 @@ void ble_begin(const String &name) {
   cmd->setCallbacks(&charCb);
   netChar->setCallbacks(&charCb);
   for (auto *c : chars) c->setCallbacks(&charCb);
+  ble_hid_begin(server);  // HID over GATT, same server: the host's mouse/keyboard connection
   server->start();
 
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   NimBLEAdvertisementData data, scan;
   data.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
   data.setCompleteServices(NimBLEUUID(UUID("0000")));
+  ble_hid_advertise(data);  // mouse appearance + 0x1812 (payload: 3+18+4+4 = 29 of 31 bytes)
   scan.setName(name.c_str());
   adv->setAdvertisementData(data);
   adv->setScanResponseData(scan);

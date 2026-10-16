@@ -15,6 +15,7 @@
 #include "USBHIDConsumerControl.h"
 #include "tusb.h"
 #include "ble_link.h"
+#include "ble_hid.h"
 #include "netcfg.h"
 #include "video_link.h"
 #include "src/airplay/airplay.h"
@@ -34,10 +35,58 @@ USBHIDConsumerControl consumer;
 const uint16_t AC_HOME = 0x0223;  // HID consumer page: AC Home
 static String receiverName = "ESP32 Agent";
 
+// Where HID reports go: "usb" (the phone's port), "ble" (Bluetooth, no cable) or "auto" (default):
+// auto prefers USB when a USB host is present and falls back to Bluetooth when the board runs on
+// battery power. Not persisted: every boot starts on auto, like `coex`.
+static String hidMode = "auto";
+static uint8_t bleButtons = 0;  // held mouse buttons while in ble mode
+
+static bool bleHid() {
+  if (hidMode == "ble") return true;
+  if (hidMode == "usb") return false;
+  return !tud_mounted();  // auto: no USB host (battery power) -> Bluetooth
+}
+
+// --- HID output, USB or BLE. The USB objects stay alive in ble mode; the phone just sees no input.
+static void hidMove(int dx, int dy) {
+  if (bleHid()) ble_hid_mouse(bleButtons, constrain(dx, -127, 127), constrain(dy, -127, 127), 0, 0);
+  else mouse.move(dx, dy);
+}
+static void hidScroll(int v, int h) {
+  if (bleHid()) ble_hid_mouse(bleButtons, 0, 0, constrain(v, -127, 127), constrain(h, -127, 127));
+  else mouse.move(0, 0, v, h);
+}
+static void hidPress() {
+  if (bleHid()) { bleButtons |= 1; ble_hid_mouse(bleButtons, 0, 0, 0, 0); }
+  else mouse.press(MOUSE_LEFT);
+}
+static void hidRelease() {
+  if (bleHid()) { bleButtons &= ~1; ble_hid_mouse(bleButtons, 0, 0, 0, 0); }
+  else mouse.release(MOUSE_LEFT);
+}
+static void hidReleaseAll() {
+  if (bleHid()) { bleButtons = 0; const uint8_t none[6] = {0}; ble_hid_keys(0, none); }
+  else keyboard.releaseAll();
+}
+// HID usage id -> modifier bit (0xE0..0xE7) or 0; ASCII letters/digits are their own usage.
+static uint8_t modBit(uint8_t c) { return c >= 0xE0 && c <= 0xE7 ? 1 << (c - 0xE0) : 0; }
+static void bleKeys(uint8_t mods, uint8_t a, uint8_t b = 0) {
+  const uint8_t k[6] = {a, b, 0, 0, 0, 0};
+  ble_hid_keys(mods, k);
+}
+static void hidTypeChar(uint8_t c) {
+  if (bleHid()) { bleKeys(0, c); delay(5); bleKeys(0, 0); }
+  else { keyboard.press(c); delay(5); keyboard.release(c); }
+}
+static void hidConsumer(uint16_t usage) {
+  if (bleHid()) { ble_hid_consumer(usage); delay(40); ble_hid_consumer(0); }
+  else { consumer.press(usage); delay(40); consumer.release(); }
+}
+
 void movePaced(long dx, long dy) {
   while (dx || dy) {
     int sx = constrain(dx, -STEP, STEP), sy = constrain(dy, -STEP, STEP);
-    mouse.move(sx, sy);
+    hidMove(sx, sy);
     dx -= sx;
     dy -= sy;
     delay(STEP_MS);
@@ -63,6 +112,21 @@ uint8_t keyCode(const String &k) {
 
 bool pressCombo(String combo) {
   combo += '+';
+  if (bleHid()) {  // assemble modifiers + slots, send once, release
+    uint8_t mods = 0, slots[6] = {0};
+    int n = 0;
+    for (int i; (i = combo.indexOf('+')) >= 0; combo = combo.substring(i + 1)) {
+      uint8_t c = keyCode(combo.substring(0, i));
+      if (!c || (!modBit(c) && n >= 6)) { ble_hid_keys(0, slots); return false; }
+      if (modBit(c)) mods |= modBit(c);
+      else slots[n++] = c;
+    }
+    ble_hid_keys(mods, slots);
+    delay(30);
+    const uint8_t none[6] = {0};
+    ble_hid_keys(0, none);
+    return true;
+  }
   for (int i; (i = combo.indexOf('+')) >= 0; combo = combo.substring(i + 1)) {
     uint8_t c = keyCode(combo.substring(0, i));
     if (!c) { keyboard.releaseAll(); return false; }
@@ -74,8 +138,10 @@ bool pressCombo(String combo) {
 }
 
 // A locked or sleeping phone suspends USB; sending HID reports then can stall. Ask it to wake up instead,
-// and report "asleep" right away if it does not, so the board never hangs.
+// and report "asleep" right away if it does not, so the board never hangs. In ble mode the check is
+// whether a host's HID stack has subscribed to the input reports (nothing to wake: no USB).
 bool usbReady() {
+  if (bleHid()) return ble_hid_connected();
   if (tud_suspended()) {
     tud_remote_wakeup();
     for (int i = 0; i < 50 && tud_suspended(); i++) delay(10);
@@ -91,19 +157,28 @@ String run(const String &line) {
   sscanf(arg.c_str(), "%ld %ld", &a, &b);
 
   if (cmd == "ping") return "ok";
-  if (!usbReady()) return "err phone usb asleep (unlock the phone)";
+  if (cmd == "hid") {  // auto | usb | ble: where HID reports go (not persisted, like coex)
+    if (arg != "usb" && arg != "ble" && arg != "auto") return "err usage: hid auto|usb|ble";
+    hidReleaseAll();
+    hidMode = arg;
+    return String("ok ") + hidMode + (bleHid() && !ble_hid_connected() ? " (no bluetooth hid host yet)" : "");
+  }
+  if (!usbReady()) return bleHid() ? "err no bluetooth hid host (pair the board)" : "err phone usb asleep (unlock the phone)";;
   if (cmd == "home") {  // slam the pointer into the top-left corner
-    for (int i = 0; i < HOME_REPORTS; i++) { mouse.move(-127, -127); delay(2); }
+    for (int i = 0; i < HOME_REPORTS; i++) { hidMove(-127, -127); delay(2); }
     return "ok";
   }
   if (cmd == "move") { movePaced(a, b); return "ok"; }
-  if (cmd == "press") { mouse.press(MOUSE_LEFT); return "ok"; }
-  if (cmd == "release") { mouse.release(MOUSE_LEFT); return "ok"; }
-  if (cmd == "click") { mouse.press(MOUSE_LEFT); delay(60); mouse.release(MOUSE_LEFT); return "ok"; }
-  if (cmd == "scroll") { mouse.move(0, 0, a, b); return "ok"; }
-  if (cmd == "type") { keyboard.print(arg); return "ok"; }
+  if (cmd == "press") { hidPress(); return "ok"; }
+  if (cmd == "release") { hidRelease(); return "ok"; }
+  if (cmd == "click") { hidPress(); delay(60); hidRelease(); return "ok"; }
+  if (cmd == "scroll") { hidScroll(a, b); return "ok"; }
+  if (cmd == "type") {
+    for (unsigned i = 0; i < arg.length(); i++) hidTypeChar(arg[i]);
+    return "ok";
+  }
   if (cmd == "key") return pressCombo(arg) ? "ok" : "err unknown key";
-  if (cmd == "homescreen") { consumer.press(AC_HOME); delay(40); consumer.release(); return "ok"; }
+  if (cmd == "homescreen") { hidConsumer(AC_HOME); return "ok"; }
   return "err unknown command";
 }
 
@@ -175,11 +250,11 @@ String statusJson(bool full) {
   VideoStats v = video_stats();
   char s[384];
   snprintf(s, sizeof s,
-           "{\"up\":%lu,\"rst\":\"%s\",\"heap\":%u,\"psram\":%u,\"usb\":\"%s\",\"net\":\"%s\",\"ip\":\"%s\",\"sta\":%d,"
+           "{\"up\":%lu,\"rst\":\"%s\",\"heap\":%u,\"psram\":%u,\"usb\":\"%s\",\"hid\":\"%s\",\"net\":\"%s\",\"ip\":\"%s\",\"sta\":%d,"
            "\"ap\":\"%s\",\"w\":%u,\"h\":%u,\"kbps\":%lu,\"fps\":%.1f,\"idr\":%lu,\"gop\":%lu,"
            "\"ble\":{\"mtu\":%u,\"phy\":%u,\"kbps\":%lu,\"drop\":%lu,\"rdrop\":%lu,\"n\":%d}}",
            millis(), resetReason(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), usbState(), net_mode(), net_ip().c_str(), net_peers(),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), usbState(), hidMode.c_str(), net_mode(), net_ip().c_str(), net_peers(),
            apStates[airplay_state()], cfg_width(), cfg_height(), (unsigned long)v.kbps, v.fps, (unsigned long)v.idr_ms,
            (unsigned long)v.gop_bytes, ble_mtu(), ble_phy(), (unsigned long)ble_kbps(), (unsigned long)ble_drops(),
            (unsigned long)ble_reply_drops(), ble_peers());
@@ -250,8 +325,8 @@ void loop() {
   esp_task_wdt_reset();
   net_poll();
   if (linked && !ble_connected()) {
-    mouse.release(MOUSE_LEFT);  // a gesture cut off mid-way must not leave the button held (long press)
-    keyboard.releaseAll();
+    hidRelease();  // a gesture cut off mid-way must not leave the button held (long press)
+    hidReleaseAll();
     video_stream(false);
   }
   linked = ble_connected();
