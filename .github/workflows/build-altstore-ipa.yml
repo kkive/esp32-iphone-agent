@@ -1,0 +1,60 @@
+name: Build AltStore IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-altstore]
+    paths:
+      - "ios/**"
+      - "prompts/**"
+      - ".github/workflows/build-altstore-ipa.yml"
+
+jobs:
+  build:
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build unsigned device app
+        run: |
+          xcodebuild \
+            -project IPhoneAgent.xcodeproj \
+            -scheme IPhoneAgent \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM= \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          app="build-device/Build/Products/Release-iphoneos/IPhoneAgent.app"
+          test -d "$app"
+          test -f "$app/IPhoneAgent"
+          mkdir -p package/Payload
+          ditto "$app" package/Payload/IPhoneAgent.app
+          cd package
+          /usr/bin/zip -qry ../IPhoneAgent-AltStore-unsigned.ipa Payload
+          cd ..
+          /usr/bin/codesign -d --entitlements :- "$app" 2>/dev/null || true
+          find "$app/PlugIns" -maxdepth 2 -type d -name '*.appex' -print 2>/dev/null || true
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v5
+        with:
+          name: IPhoneAgent-AltStore-unsigned
+          path: ios/IPhoneAgent-AltStore-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

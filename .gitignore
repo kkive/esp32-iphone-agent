@@ -11,6 +11,7 @@ hardware/hid_bridge/secrets.h
 
 # Build output
 hardware/build/
+hardware/build-windows/
 hardware/hid_bridge/build/
 
 # Editors and OS
