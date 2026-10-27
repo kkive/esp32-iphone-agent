@@ -33,6 +33,8 @@ import UIKit
     @Published var progress: Progress?  // probe clicks
     /// Why the last run failed, in words for the board (e.g. clicks not reaching the screen).
     @Published var problem: String?
+    /// Manual calibration parks the pointer below the system status area. Exposed for its instructions.
+    @Published private(set) var manualMoving = false
     /// The calibration board is up.
     @Published private(set) var boardOpen = false
     /// The small success toast ("Pointer calibrated ±0.6%").
@@ -41,6 +43,7 @@ import UIKit
     var link = -1  // board link the pointer was last calibrated on
     private var hide: Task<Void, Never>?
     private var current: Task<Void, Never>?
+    private var manualUnits = (x: 200, y: 320)
 
     init(app: AppModel) { self.app = app }
 
@@ -192,8 +195,8 @@ import UIKit
         current?.cancel()
         current = Task {
             do {
-                try await app.pointer.reset()
-                try await app.board.commands.send("move \(Pointer.calibrationMove) \(Pointer.calibrationMove)")
+                manualUnits = (200, 320)
+                try await placeManualPointer()
             } catch {
                 return failed(error.localizedDescription)
             }
@@ -201,11 +204,30 @@ import UIKit
             while !Task.isCancelled && phase == .needsTap {
                 if let p = await app.probe.tap(since: since, timeout: 1) {
                     app.say(String(format: "calibration: tapped the pointer at (%.3f, %.3f)", p.x, p.y))
-                    app.pointer.finishCalibration(x: p.x, y: p.y)
+                    app.pointer.finishCalibration(x: p.x, y: p.y, unitsX: manualUnits.x, unitsY: manualUnits.y)
                     return finished(app.pointer.quality ?? 0.01)
                 }
             }
         }
+    }
+
+    /// Move the manual target farther down from a fresh home. This keeps the dot in app-controlled space
+    /// on phones whose status bar/Dynamic Island owns the very top of the display.
+    func moveManualPointerDown() {
+        guard phase == .needsTap, !manualMoving else { return }
+        manualUnits.y = min(manualUnits.y + 100, 620)
+        Task {
+            do { try await placeManualPointer() }
+            catch { failed(error.localizedDescription) }
+        }
+    }
+
+    private func placeManualPointer() async throws {
+        manualMoving = true
+        defer { manualMoving = false }
+        try await app.pointer.reset()
+        try await app.board.commands.send("move \(manualUnits.x) \(manualUnits.y)")
+        app.say("calibration: manual pointer parked at \(manualUnits.x), \(manualUnits.y)")
     }
 
     private func mockRun() async {

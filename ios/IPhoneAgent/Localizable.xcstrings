@@ -2048,6 +2048,46 @@
         }
       }
     },
+    "Manual calibration: tap the grey dot" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动校准：点击灰色圆点"
+          }
+        }
+      }
+    },
+    "Moving…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在移动…"
+          }
+        }
+      }
+    },
+    "The dot is still too high" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "圆点仍然太靠上"
+          }
+        }
+      }
+    },
+    "Use your finger to tap the centre of the dot. It should be below the status area; Screen Mirroring is optional." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用手指点击圆点中心。圆点应位于状态栏下方；手动校准不要求打开屏幕镜像。"
+          }
+        }
+      }
+    },
     "It's the grey dot, near the top left." : {
       "localizations" : {
         "zh-Hans" : {

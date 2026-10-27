@@ -182,6 +182,13 @@ import XCTest
         XCTAssertEqual(again.span, Pointer.Span(w: 400, h: 800))
     }
 
+    func testManualCalibrationCanParkBelowTheStatusArea() {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        let pointer = Pointer(device: FakeDevice(), calibrationFile: file)
+        pointer.finishCalibration(x: 0.5, y: 0.4, unitsX: 200, unitsY: 320)
+        XCTAssertEqual(pointer.span, Pointer.Span(w: 400, h: 800))
+    }
+
     func testModelSettingsNeedOnlyAnEndpoint() {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let settings = Settings(defaults: defaults, info: nil)  // no build-time preset

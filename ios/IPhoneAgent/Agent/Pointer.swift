@@ -115,9 +115,17 @@ import Foundation
 
     /// x, y: where the pointer ended up after startCalibration() (one point, picked by the user).
     func finishCalibration(x: Double, y: Double) {
+        finishCalibration(x: x, y: y, unitsX: Self.calibrationMove, unitsY: Self.calibrationMove)
+    }
+
+    /// Manual calibration may park the pointer farther down than the automatic diagonal probe so it
+    /// stays clear of the status bar and Dynamic Island. The two axes therefore keep their own move.
+    func finishCalibration(x: Double, y: Double, unitsX: Int, unitsY: Int) {
         (quality, aspect) = (nil, screenAspect())
-        span = Span(w: Int((Double(Self.calibrationMove) / x).rounded(.toNearestOrEven)), h: Int((Double(Self.calibrationMove) / y).rounded(.toNearestOrEven)))
+        span = Span(w: Int((Double(unitsX) / x).rounded(.toNearestOrEven)),
+                    h: Int((Double(unitsY) / y).rounded(.toNearestOrEven)))
         seen = ["x": [], "y": []]
+        pos = nil  // the next real gesture re-homes; the manual move bypassed Pointer.moveTo
         save()
     }
 

@@ -75,8 +75,15 @@ struct CalibrationBoard: View {
                     }
                     .controlSize(.small).buttonBorderShape(.capsule).padding(.top, Space.xs)
                 case .needsTap:
-                    Text("Tap exactly where the pointer is").font(.subheadline.weight(.semibold))
-                    Text("It's the grey dot, near the top left.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Manual calibration: tap the grey dot").font(.subheadline.weight(.semibold))
+                    Text("Use your finger to tap the centre of the dot. It should be below the status area; Screen Mirroring is optional.")
+                        .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button(calibrator.manualMoving ? "Moving…" : "The dot is still too high") {
+                        calibrator.moveManualPointerDown()
+                    }
+                    .disabled(calibrator.manualMoving)
+                    .buttonStyle(.bordered).controlSize(.small).buttonBorderShape(.capsule)
+                    .area("manual-down", probe)
                 default:
                     Group {
                         if let p = calibrator.progress {

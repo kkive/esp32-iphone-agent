@@ -70,8 +70,10 @@ const uint8_t REPORT_MAP[] = {
     0xC0,
 };
 
-// Input reports are 1 byte report ID + payload (sent with the ID prepended).
-const uint8_t HID_INFO[] = {0x11, 0x00, 0x02};  // v1.1, country 0, normally connectable
+// HID Information is bcdHID (little endian), country and flags. HOGP report values do not
+// carry the Report ID: the Report Reference descriptor identifies the report and the host's
+// translation layer prepends the ID before handing it to the HID class driver.
+const uint8_t HID_INFO[] = {0x11, 0x01, 0x00, 0x02};  // v1.11, country 0, normally connectable
 std::atomic<int> hidHost{-1};                   // the central whose system HID stack subscribed
 std::atomic<uint8_t> hidReports{0};             // mouse=1, keyboard=2, consumer=4
 
@@ -138,6 +140,12 @@ void ble_hid_begin(NimBLEServer *server) {
   consChr = svc->createCharacteristic(NimBLEUUID((uint16_t)0x2A4D),
                                       NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   reportRef(consChr, 3, 1);
+  const uint8_t idleMouse[5] = {0};
+  const uint8_t idleKeys[8] = {0};
+  const uint8_t idleConsumer[2] = {0};
+  mouseChr->setValue(idleMouse, sizeof idleMouse);
+  keysChr->setValue(idleKeys, sizeof idleKeys);
+  consChr->setValue(idleConsumer, sizeof idleConsumer);
   // Keyboard LED output report: the host writes it; no action needed.
   NimBLECharacteristic *leds = svc->createCharacteristic(NimBLEUUID((uint16_t)0x2A4D), NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
   reportRef(leds, 2, 2);
@@ -174,16 +182,16 @@ static bool notifyRetry(NimBLECharacteristic *c, const uint8_t *report, size_t l
 }
 
 void ble_hid_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel, int8_t pan) {
-  const uint8_t r[6] = {1, buttons, (uint8_t)dx, (uint8_t)dy, (uint8_t)wheel, (uint8_t)pan};
+  const uint8_t r[5] = {buttons, (uint8_t)dx, (uint8_t)dy, (uint8_t)wheel, (uint8_t)pan};
   notifyRetry(mouseChr, r, sizeof r);
 }
 
 void ble_hid_keys(uint8_t modifiers, const uint8_t keys[6]) {
-  const uint8_t r[9] = {2, modifiers, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]};
+  const uint8_t r[8] = {modifiers, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]};
   notifyRetry(keysChr, r, sizeof r);
 }
 
 void ble_hid_consumer(uint16_t usage) {
-  const uint8_t r[3] = {3, (uint8_t)(usage & 0xFF), (uint8_t)(usage >> 8)};
+  const uint8_t r[2] = {(uint8_t)(usage & 0xFF), (uint8_t)(usage >> 8)};
   notifyRetry(consChr, r, sizeof r);
 }
