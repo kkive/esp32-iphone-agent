@@ -139,6 +139,15 @@ import XCTest
         XCTAssertEqual(frame.payload, payload)
     }
 
+    func testWiFiCommandRoutingKeepsAsyncBLEOperationsOnBLE() {
+        for command in ["click", "move 10 20", "type hello", "stream on", "res 480 1040"] {
+            XCTAssertTrue(BoardLink.wifiEligible("101 \(command)"), command)
+        }
+        for command in ["snap", "bench 256", "app run", "log hello", "unpair"] {
+            XCTAssertFalse(BoardLink.wifiEligible("102 \(command)"), command)
+        }
+    }
+
     func testPointerRehomesEveryTenGestures() async throws {
         let device = FakeDevice()
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")

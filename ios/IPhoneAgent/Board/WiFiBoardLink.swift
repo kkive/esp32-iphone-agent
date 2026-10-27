@@ -14,6 +14,7 @@ import Network
     var onStatus: ((BoardStatus) -> Void)?
     var onVideo: ((AccessUnit) -> Void)?
     var onReady: ((Bool) -> Void)?
+    var onReply: ((String) -> Void)?
     private let queue = DispatchQueue(label: "iphone-agent-wifi-link")
     private var connection: NWConnection?
     private var parser = WiFiFrameParser()
@@ -37,6 +38,20 @@ import Network
     }
 
     func reconnect() { if config != nil { connect() } }
+
+    /// A BLE heartbeat can run while the app is backgrounded; use it to restore the fast socket on demand.
+    func wake() {
+        if state == .idle || state == .failed { reconnect() }
+    }
+
+    /// Accepts the CommandChannel wire form (`id command`) and maps the id into the IAW1 header.
+    @discardableResult func write(_ line: String) -> Bool {
+        guard state == .ready, connection != nil else { return false }
+        let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let id = UInt32(parts[0]), !parts[1].isEmpty else { return false }
+        send(.command, sequence: id, payload: Data(parts[1].utf8))
+        return true
+    }
 
     func stop() {
         generation += 1
@@ -113,6 +128,8 @@ import Network
             if let started = pingStarted.removeValue(forKey: frame.sequence) {
                 roundTripMilliseconds = (now() - started) * 1000
             }
+        case .reply:
+            onReply?("\(frame.sequence) \(String(decoding: frame.payload, as: UTF8.self))")
         case .error:
             lastError = String(decoding: frame.payload, as: UTF8.self)
         default: break

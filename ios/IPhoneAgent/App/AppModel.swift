@@ -109,14 +109,20 @@ import UIKit
         }
         board.onVideo = { [weak self] in self?.feed.receive($0) }
         board.onNet = { [weak self] in self?.wifi.configure($0) }
+        board.wifiWrite = { [weak self] in self?.wifi.write($0) ?? false }
         wifi.onVideo = { [weak self] in self?.feed.receiveWiFi($0) }
-        wifi.onReady = { [weak self] in self?.feed.wifiReady($0) }
+        wifi.onReady = { [weak self] ready in
+            self?.feed.wifiReady(ready)
+            self?.board.setWiFiCommandReady(ready)
+        }
+        wifi.onReply = { [weak self] in self?.board.commands.handleReply($0) }
         board.onStatus = { [weak self] s in
             self?.statusRefreshError = nil
             self?.feed.mirroring = s.ap == "streaming"
             if let up = s.up { self?.feed.boardClock(ms: up) }
             self?.metrics.status(s)
             self?.logStatus(s)
+            self?.wifi.wake()
         }
         board.onLinkUp = { [weak self] in
             guard let self else { return }
@@ -156,7 +162,11 @@ import UIKit
             MainActor.assumeIsolated { self?.metrics.enteredBackground(); DebugLog.write("app: background") }
         }
         center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.metrics.enteredForeground(); DebugLog.write("app: foreground") }
+            MainActor.assumeIsolated {
+                self?.metrics.enteredForeground()
+                self?.wifi.wake()
+                DebugLog.write("app: foreground")
+            }
         }
         if MockMode.on { startMock() }
         runs.reload()

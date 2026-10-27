@@ -29,6 +29,8 @@ import Foundation
     var onNet: ((NetConfig) -> Void)?
     var onLinkUp: (() -> Void)?
     var onLinkDown: (() -> Void)?
+    var wifiWrite: ((String) -> Bool)?
+    private var wifiCommandReady = false
     private var lastNotify = 0.0  // last notification of any kind, to tell a supervision timeout from a peer drop
     private var statusRevision = 0
     private var readySince = 0.0
@@ -233,8 +235,23 @@ import Foundation
 
     // MARK: - BoardTransport
 
+    func setWiFiCommandReady(_ ready: Bool) { wifiCommandReady = ready }
+
+    private func useWiFi(for line: String) -> Bool {
+        guard wifiCommandReady, wifiWrite != nil else { return false }
+        return Self.wifiEligible(line)
+    }
+
+    static func wifiEligible(_ line: String) -> Bool {
+        let command = line.split(separator: " ", maxSplits: 2).dropFirst().first.map(String.init) ?? ""
+        guard !command.isEmpty else { return false }
+        // These operations still use BLE because their replies/data are produced by the BLE-specific async path.
+        return !["snap", "bench", "app", "log", "unpair"].contains(command)
+    }
+
     func write(_ line: String) throws {
         if mock, connected { return mockReply(line) }
+        if useWiFi(for: line), wifiWrite?(line) == true { return }
         guard let peripheral, let c = chars[BoardUUID.cmd], connected else {
             throw DeviceError(message: "board not connected")
         }
@@ -244,9 +261,10 @@ import Foundation
         peripheral.writeValue(data, for: c, type: fast ? .withoutResponse : .withResponse)  // long writes need a response
     }
 
-    var maxWrite: Int { peripheral?.maximumWriteValueLength(for: .withoutResponse) ?? 20 }
+    var maxWrite: Int { wifiCommandReady ? 512 : peripheral?.maximumWriteValueLength(for: .withoutResponse) ?? 20 }
 
     func writeIfIdle(_ line: String) -> Bool {
+        if useWiFi(for: line), wifiWrite?(line) == true { return true }
         guard !mock, let peripheral, let c = chars[BoardUUID.cmd], connected,
               c.properties.contains(.writeWithoutResponse), peripheral.canSendWriteWithoutResponse else { return false }
         let data = Data(line.utf8)

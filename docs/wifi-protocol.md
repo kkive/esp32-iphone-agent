@@ -23,11 +23,16 @@ All integers are little-endian. A frame is a fixed 20-byte header followed by `p
 Message types: `1 HELLO`, `2 HELLO_REPLY`, `3 VIDEO_CONFIG`, `4 VIDEO_AU`, `5 STATUS`, `6 COMMAND`, `7 REPLY`, `8 PING`, `9 PONG`, `10 ERROR`.
 
 - `COMMAND` is UTF-8 text using the same command vocabulary as BLE. Its `seq` is echoed by `REPLY`.
+  The app reuses that request ID when retrying. The firmware suppresses duplicates in flight and caches the last
+  32 replies, so a delayed/lost reply does not execute a click or gesture twice.
 - `STATUS` is UTF-8 JSON and uses sequence zero.
 - `PING` payload and sequence are echoed by `PONG`.
 - `VIDEO_CONFIG` carries Annex-B SPS/PPS. `VIDEO_AU` carries one complete Annex-B access unit; flag bit 0 marks an IDR.
   When the authenticated socket is ready, continuous H.264 uses Wi-Fi. A socket failure makes the firmware restart
   the current GOP over BLE, so the app changes transport without losing decoder state.
+
+The encrypted one-second BLE status notification remains subscribed in the background. Receiving it gives the app
+an opportunity to recreate the Wi-Fi socket; raw TCP is not treated as the background wake mechanism.
 
 ## Alpha.1 smoke test
 

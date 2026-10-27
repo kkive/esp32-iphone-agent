@@ -29,8 +29,8 @@ AI 编程助手（Claude Code、Codex、Cursor、Copilot 等）：如果复制�
 > 旧版（Mac/Linux 电脑跑 UxPlay + Python 服务端）保留在 tag [`v0.1.0`](https://github.com/onehumanbeing/esp32-iphone-agent/tree/v0.1.0)
 > 和分支 [`legacy`](https://github.com/onehumanbeing/esp32-iphone-agent/tree/legacy)，见 [docs/legacy.md](docs/legacy.md)。
 
-> **v0.2 Wi-Fi 传输预览：**`v0.2.0-alpha.2` 已把板子到 App 的 H.264 画面迁移到经过令牌认证的
-> TCP 通道；连接中断时会自动回到蓝牙画面。状态、往返延迟诊断和命令分帧共用同一连接。
+> **v0.2 Wi-Fi 传输预览：**`v0.2.0-alpha.3` 通过认证 TCP 通道传输 H.264 和常规控制命令，
+> 由蓝牙心跳在后台唤醒并恢复 Wi-Fi 连接，异常时立即使用蓝牙链路。请求/回复去重可避免重试时重复执行手势。
 > 协议说明见 [IAW1](docs/wifi-protocol.md)。
 
 <p align="center"><img src="docs/images/example-alarm.png" alt="插着 XIAO ESP32S3 的 iPhone 正在设置闹钟" width="100%"></p>

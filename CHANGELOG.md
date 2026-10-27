@@ -2,6 +2,13 @@
 
 ## Unreleased (main)
 
+### v0.2.0-alpha.3 Wi-Fi commands and background restoration
+
+- Routes normal HID, stream and board-setting commands over Wi-Fi while keeping BLE for asynchronous snapshot/debug operations.
+- Reuses request IDs on retry and caches the last 32 firmware replies, preventing a lost reply from repeating a click or gesture.
+- Uses the one-second BLE heartbeat as a background wake signal to restore the authenticated Wi-Fi socket.
+- Keeps BLE command/video behavior as the immediate fallback whenever the socket is not ready.
+
 ### v0.2.0-alpha.2 Wi-Fi H.264
 
 - Streams complete Annex-B H.264 configuration/access units over the authenticated Wi-Fi socket.

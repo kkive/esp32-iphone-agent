@@ -14,14 +14,57 @@ static const uint8_t VIDEO_FLAG_IDR = 1;
 struct CommandItem { uint32_t id; char text[513]; };
 struct ReplyItem { uint32_t id; char text[769]; };
 struct StatusItem { char text[513]; };
+struct CacheEntry { uint32_t id; bool valid; char text[160]; };
 
 static QueueHandle_t commands, replies, statuses;
 static SemaphoreHandle_t txLock;
+static SemaphoreHandle_t cacheLock;
 static NetworkClient client;
 static portMUX_TYPE statsMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool statConnected, statAuthed;
 static volatile uint32_t statKbps, statErrors, statAuthFailures, statRtt, statWindowBytes;
 static uint32_t videoSeq;
+static CacheEntry replyCache[32];
+static uint8_t cacheNext;
+static uint32_t pendingIds[8];
+
+static bool cachedReply(uint32_t id, char out[160]) {
+  bool found = false;
+  xSemaphoreTake(cacheLock, portMAX_DELAY);
+  for (const CacheEntry &entry : replyCache) {
+    if (entry.valid && entry.id == id) {
+      strncpy(out, entry.text, 159);
+      out[159] = 0;
+      found = true;
+      break;
+    }
+  }
+  xSemaphoreGive(cacheLock);
+  return found;
+}
+
+static bool markPending(uint32_t id) {
+  bool fresh = true;
+  xSemaphoreTake(cacheLock, portMAX_DELAY);
+  for (uint32_t pending : pendingIds) if (pending == id) fresh = false;
+  if (fresh) {
+    fresh = false;
+    for (uint32_t &pending : pendingIds) if (!pending) { pending = id; fresh = true; break; }
+  }
+  xSemaphoreGive(cacheLock);
+  return fresh;
+}
+
+static void rememberReply(uint32_t id, const char *text) {
+  xSemaphoreTake(cacheLock, portMAX_DELAY);
+  for (uint32_t &pending : pendingIds) if (pending == id) pending = 0;
+  CacheEntry &entry = replyCache[cacheNext++ % 32];
+  entry.id = id;
+  entry.valid = true;
+  strncpy(entry.text, text, sizeof entry.text - 1);
+  entry.text[sizeof entry.text - 1] = 0;
+  xSemaphoreGive(cacheLock);
+}
 
 static bool tokenEqual(const uint8_t *p, size_t n, const String &expected) {
   size_t diff = n ^ expected.length();
@@ -100,9 +143,18 @@ static void queueCommand(const iaw_header &h, uint8_t *payload) {
     sendText(IAW_REPLY, h.seq, "err command too long");
     return;
   }
+  char cached[160];
+  if (cachedReply(h.seq, cached)) {
+    sendText(IAW_REPLY, h.seq, cached);
+    return;
+  }
+  if (!markPending(h.seq)) return;  // duplicate in flight: its one eventual reply satisfies both attempts
   CommandItem item = {h.seq, {0}};
   memcpy(item.text, payload, h.payload_len);
-  if (xQueueSend(commands, &item, 0) != pdTRUE) sendText(IAW_REPLY, h.seq, "err busy");
+  if (xQueueSend(commands, &item, 0) != pdTRUE) {
+    rememberReply(h.seq, "err busy");
+    sendText(IAW_REPLY, h.seq, "err busy");
+  }
 }
 
 static bool dispatch(const iaw_header &h, uint8_t *payload, bool &authed) {
@@ -229,7 +281,8 @@ bool wifi_link_begin() {
   replies = xQueueCreate(8, sizeof(ReplyItem));
   statuses = xQueueCreate(1, sizeof(StatusItem));
   txLock = xSemaphoreCreateMutex();
-  if (!commands || !replies || !statuses || !txLock) return false;
+  cacheLock = xSemaphoreCreateMutex();
+  if (!commands || !replies || !statuses || !txLock || !cacheLock) return false;
   return xTaskCreatePinnedToCore(linkTask, "wifi-link", 6144, NULL, 2, NULL, 1) == pdPASS;
 }
 
@@ -245,6 +298,7 @@ void wifi_link_reply(uint32_t request_id, const String &reply) {
   if (!replies) return;
   ReplyItem item = {request_id, {0}};
   strncpy(item.text, reply.c_str(), sizeof item.text - 1);
+  rememberReply(request_id, item.text);
   xQueueSend(replies, &item, 0);
 }
 

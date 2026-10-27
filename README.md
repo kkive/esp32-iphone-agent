@@ -30,9 +30,9 @@ Demo video and updates: [X @iamhenryyuan](https://x.com/iamhenryyuan) · [YouTub
 > tag [`v0.1.0`](https://github.com/onehumanbeing/esp32-iphone-agent/tree/v0.1.0) and branch
 > [`legacy`](https://github.com/onehumanbeing/esp32-iphone-agent/tree/legacy). See [docs/legacy.md](docs/legacy.md).
 
-> **v0.2 Wi-Fi transport preview:** `v0.2.0-alpha.2` moves H.264 from the board to the app over an authenticated
-> TCP link and automatically returns to BLE if that socket drops. Status, RTT diagnostics and framed commands share
-> the same connection. See [the IAW1 protocol](docs/wifi-protocol.md).
+> **v0.2 Wi-Fi transport preview:** `v0.2.0-alpha.3` carries H.264 and normal control commands over an authenticated
+> TCP link, uses BLE heartbeats to restore that link in the background, and immediately returns to BLE when it is
+> unavailable. Request/reply deduplication prevents a retry from repeating a gesture. See [IAW1](docs/wifi-protocol.md).
 
 <p align="center"><img src="docs/images/example-alarm.png" alt="An iPhone with a XIAO ESP32S3 plugged in, setting an alarm" width="100%"></p>
 

@@ -120,13 +120,16 @@ extension BoardTransport {
     /// Send one command; returns the text after "ok" (e.g. bench's ms). Throws DeviceError on err/timeout.
     @discardableResult
     func send(_ command: String) async throws -> String {
+        let id = nextID
+        nextID += 1
         do {
-            return try await send(command, timeout: nil)
+            return try await sendAttempt(command, timeout: nil, id: id)
         } catch let e as BoardTimeout {
             guard command != "ping", !command.hasPrefix("stream"), let onTimeout else { throw e }
             await onTimeout(command)
             DebugLog.write("cmd retry after timeout: \(command.prefix(40))")
-            return try await send(command, timeout: nil)
+            // Keep the request id: firmware caches the last 32 replies, so a lost reply never repeats a gesture.
+            return try await sendAttempt(command, timeout: nil, id: id)
         }
     }
 
@@ -134,14 +137,18 @@ extension BoardTransport {
     /// BoardTimeout and keeps the connection; only a real CoreBluetooth disconnect fails as link lost.
     @discardableResult
     func send(_ command: String, timeout custom: Double?) async throws -> String {
+        let id = nextID
+        nextID += 1
+        return try await sendAttempt(command, timeout: custom, id: id)
+    }
+
+    private func sendAttempt(_ command: String, timeout custom: Double?, id: Int) async throws -> String {
         guard connected, let transport else { throw DeviceError(message: "board not connected") }
         let timeout = custom ?? Self.timeout(command)
         let name = String(command.split(separator: " ").first ?? "")
         await lock.lock()
         defer { lock.unlock() }
         let started = now()
-        let id = nextID
-        nextID += 1
         let reply: BoardReply
         do {
             reply = try await withTaskCancellationHandler {
