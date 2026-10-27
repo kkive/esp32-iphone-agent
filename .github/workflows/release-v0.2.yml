@@ -22,8 +22,15 @@ jobs:
       - name: Package firmware
         run: |
           mkdir firmware-package
-          cp hardware/build/*.bin hardware/build/flash_args hardware/flash.sh LICENSE NOTICE firmware-package/
-          cp docs/wifi-protocol.md firmware-package/
+          cp hardware/build/*.bin hardware/flash.sh LICENSE NOTICE firmware-package/
+          cp docs/wifi-protocol.md hardware/tools/wifi_smoke.py firmware-package/
+          cat > firmware-package/FLASH.txt <<'EOF'
+          Flash the merged image at offset 0 with esptool 5.x:
+            esptool --chip esp32s3 --port PORT write-flash 0x0 hid_bridge.ino.merged.bin
+
+          Keep the board connected to the computer during flashing. At run time it can use battery power
+          and BLE HID. Keep your previous firmware package as a rollback copy.
+          EOF
           zip -9r "ESP32-Agent-${GITHUB_REF_NAME}-firmware.zip" firmware-package
       - uses: actions/upload-artifact@v5
         with:
