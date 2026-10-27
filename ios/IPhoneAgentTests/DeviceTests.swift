@@ -108,7 +108,8 @@ import XCTest
         var parser = WiFiFrameParser()
         XCTAssertTrue(try parser.append(a.prefix(9)).isEmpty)
         XCTAssertTrue(try parser.append(a.dropFirst(9).prefix(8)).isEmpty)
-        let frames = try parser.append(a.dropFirst(17) + b)
+        var tail = Data(a.dropFirst(17)); tail.append(b)
+        let frames = try parser.append(tail)
         XCTAssertEqual(frames.count, 2)
         XCTAssertEqual(frames[0], WiFiFrame(type: .helloReply, flags: 0, sequence: 7,
                                            boardMilliseconds: 123, payload: Data("ok".utf8)))

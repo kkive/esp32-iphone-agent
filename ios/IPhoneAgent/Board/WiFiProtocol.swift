@@ -57,7 +57,9 @@ struct WiFiFrameParser {
             guard let type = WiFiMessage(rawValue: bytes[4]) else { throw DeviceError(message: "unknown Wi-Fi message") }
             frames.append(WiFiFrame(type: type, flags: bytes[5], sequence: u32(12), boardMilliseconds: u32(16),
                                     payload: bytes.subdata(in: WiFiFrameCodec.headerLength..<total)))
-            bytes.removeFirst(total)
+            // Data.removeFirst keeps a sliced collection's non-zero startIndex; normalise so the next
+            // frame can keep using protocol offsets 0...19 safely.
+            bytes = Data(bytes.dropFirst(total))
         }
         return frames
     }
