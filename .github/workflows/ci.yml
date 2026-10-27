@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, wifi-transport-v0.2]
   pull_request:
 
 jobs:
@@ -13,6 +13,10 @@ jobs:
         working-directory: ios
     steps:
       - uses: actions/checkout@v5
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
       - name: Unit tests (simulator, unsigned)
         run: |
           sim=$(xcrun simctl list devices available | grep -Eo 'iPhone [0-9]+[A-Za-z ]*\(' | head -1 | sed 's/ ($//')

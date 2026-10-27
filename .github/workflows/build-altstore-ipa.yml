@@ -3,7 +3,8 @@ name: Build AltStore IPA
 on:
   workflow_dispatch:
   push:
-    branches: [windows-altstore]
+    branches: [windows-altstore, wifi-transport-v0.2]
+    tags: ["v0.2.*"]
     paths:
       - "ios/**"
       - "prompts/**"

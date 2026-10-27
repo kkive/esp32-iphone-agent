@@ -46,7 +46,7 @@ struct SettingsView: View {
                     Text("Every run keeps a low-frame-rate video of the mirrored screen, next to the step screenshots, for the review.")
                 }
                 Section {
-                    NavigationLink { DiagnosticsView(app: app, metrics: app.metrics, board: board, feed: app.feed) } label: {
+                    NavigationLink { DiagnosticsView(app: app, metrics: app.metrics, board: board, wifi: app.wifi, feed: app.feed) } label: {
                         SettingsLabel(title: "Diagnostics", symbol: "waveform.path.ecg", color: .green)
                     }
                     Toggle(isOn: $demoData) { SettingsLabel(title: "Demo data", symbol: "theatermasks", color: .purple) }

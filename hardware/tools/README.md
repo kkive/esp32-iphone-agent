@@ -34,6 +34,12 @@ iPhone for throughput: with `--debug`, send `N bench 512` on the USB serial; the
 `hardware/flash.sh --ap-tune` (20 MHz hotspot, 300 TU beacons) vs a normal build.
 `net` passwords are masked in the output.
 
+After reading the alpha.1 token from the encrypted `net` value, the TCP transport can be checked independently:
+
+```bash
+python hardware/tools/wifi_smoke.py --token TOKEN --command ping
+```
+
 ## 3. AirPlay -> BLE
 
 1. Control Center -> Screen Mirroring -> **ESP32 Agent** (the Mac must be on the same Wi-Fi).

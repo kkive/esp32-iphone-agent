@@ -26,6 +26,7 @@ import Foundation
     let commands = CommandChannel()
     var onVideo: ((Data) -> Void)?
     var onStatus: ((BoardStatus) -> Void)?
+    var onNet: ((NetConfig) -> Void)?
     var onLinkUp: (() -> Void)?
     var onLinkDown: (() -> Void)?
     private var lastNotify = 0.0  // last notification of any kind, to tell a supervision timeout from a peer drop
@@ -473,6 +474,7 @@ extension BoardLink: CBPeripheralDelegate {
                     if linking { failConnection(error.localizedDescription) }
                 } else if let v = c.value, let config = try? JSONDecoder().decode(NetConfig.self, from: v) {
                     net = config
+                    onNet?(config)
                     if linking && subscribed.isSuperset(of: [BoardUUID.reply, BoardUUID.status, BoardUUID.video]) {
                         connectionDeadline?.cancel()
                         stopScan()

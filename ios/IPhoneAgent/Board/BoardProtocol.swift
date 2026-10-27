@@ -18,6 +18,9 @@ struct BoardStatus: Codable, Equatable {
     struct BLE: Codable, Equatable {
         var mtu: Int?, phy: Int?, kbps: Double?, drop: Int?
     }
+    struct WiFi: Codable, Equatable {
+        var up: Int?, auth: Int?, kbps: Double?, err: Int?, autherr: Int?
+    }
     var up: Int?
     var rst: String?
     var heap: Int?
@@ -30,6 +33,7 @@ struct BoardStatus: Codable, Equatable {
     var w: Int?, h: Int?
     var kbps: Double?, fps: Double?, idr: Int?, gop: Int?
     var ble: BLE?
+    var wifi: WiFi?
 
     static func decode(_ data: Data) -> BoardStatus? { try? JSONDecoder().decode(BoardStatus.self, from: data) }
 
@@ -43,6 +47,9 @@ struct BoardStatus: Codable, Equatable {
         m.gop = n.gop ?? gop
         let a = ble ?? BLE(), b = n.ble ?? BLE()
         m.ble = BLE(mtu: b.mtu ?? a.mtu, phy: b.phy ?? a.phy, kbps: b.kbps ?? a.kbps, drop: b.drop ?? a.drop)
+        let wa = wifi ?? WiFi(), wb = n.wifi ?? WiFi()
+        m.wifi = WiFi(up: wb.up ?? wa.up, auth: wb.auth ?? wa.auth, kbps: wb.kbps ?? wa.kbps,
+                      err: wb.err ?? wa.err, autherr: wb.autherr ?? wa.autherr)
         return m
     }
 }
@@ -53,6 +60,8 @@ struct NetConfig: Codable, Equatable {
     var ssid: String?
     var pass: String?
     var ip: String?
+    var port: Int?
+    var token: String?
 }
 
 /// A `reply` notify: `<id> ok [extra]` or `<id> err <reason>`.

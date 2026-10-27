@@ -1,0 +1,76 @@
+name: Release v0.2
+
+on:
+  push:
+    tags: ["v0.2.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-arduino-cli@v2
+      - run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli lib install "NimBLE-Arduino@2.5.1"
+      - name: Build firmware
+        run: hardware/flash.sh --build-only
+      - name: Package firmware
+        run: |
+          mkdir firmware-package
+          cp hardware/build/*.bin hardware/build/flash_args hardware/flash.sh LICENSE NOTICE firmware-package/
+          cp docs/wifi-protocol.md firmware-package/
+          zip -9r "ESP32-Agent-${GITHUB_REF_NAME}-firmware.zip" firmware-package
+      - uses: actions/upload-artifact@v5
+        with:
+          name: firmware
+          path: ESP32-Agent-*-firmware.zip
+
+  ios:
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build unsigned device app
+        run: |
+          xcodebuild -project IPhoneAgent.xcodeproj -scheme IPhoneAgent -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build-device \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= build
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p package/Payload
+          ditto build-device/Build/Products/Release-iphoneos/IPhoneAgent.app package/Payload/IPhoneAgent.app
+          cd package && /usr/bin/zip -qry "../IPhoneAgent-${GITHUB_REF_NAME}-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ios
+          path: ios/IPhoneAgent-*-unsigned.ipa
+
+  publish:
+    needs: [firmware, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+          generate_release_notes: true
+          body: |
+            Wi-Fi transport milestone for ESP32 iPhone Agent.
+
+            Keep a rollback copy of the previous firmware. Install the unsigned IPA with the same signing method used for earlier builds.
+
+            Based on ESP32 iPhone Agent by Henry Yuan. See LICENSE and NOTICE.
+          files: artifacts/*
+

@@ -18,7 +18,7 @@
 #endif
 
 static Preferences prefs;
-static String apSsid, apPass, staSsid, staPass, mode;  // mode: "ap" | "sta"
+static String apSsid, apPass, staSsid, staPass, mode, apiToken;  // mode: "ap" | "sta"
 static String pending;
 static SemaphoreHandle_t pendingLock = xSemaphoreCreateMutex();
 // STA retries back off: a tight reconnect loop starves BLE, which shares the radio.
@@ -37,6 +37,19 @@ static String randomPass() {
   String p;
   for (int i = 0; i < 12; i++) p += abc[esp_random() % strlen(abc)];
   return p;
+}
+
+static String randomToken() {
+  static const char hex[] = "0123456789abcdef";
+  uint8_t bytes[16];
+  esp_fill_random(bytes, sizeof bytes);
+  String out;
+  out.reserve(32);
+  for (uint8_t b : bytes) {
+    out += hex[b >> 4];
+    out += hex[b & 15];
+  }
+  return out;
 }
 
 // Value of a string field in a flat JSON object ("" if absent). Handles \" and \\ escapes.
@@ -123,6 +136,11 @@ void net_begin() {
     prefs.putString("ap_ssid", apSsid);
     prefs.putString("ap_pass", apPass);
   }
+  apiToken = prefs.getString("api_token", "");
+  if (apiToken.length() != 32) {
+    apiToken = randomToken();
+    prefs.putString("api_token", apiToken);
+  }
   mode = prefs.getString("mode", "ap");
   staSsid = prefs.getString("sta_ssid", "");
   staPass = prefs.getString("sta_pass", "");
@@ -195,7 +213,7 @@ void net_poll() {
 String net_json() {
   bool sta = mode == "sta";
   return String("{\"mode\":\"") + mode + "\",\"ssid\":\"" + jsonEsc(sta ? staSsid : apSsid) + "\",\"pass\":\"" +
-         jsonEsc(sta ? staPass : apPass) + "\",\"ip\":\"" + net_ip() + "\"}";
+         jsonEsc(sta ? staPass : apPass) + "\",\"ip\":\"" + net_ip() + "\",\"port\":8765,\"token\":\"" + apiToken + "\"}";
 }
 
 const char *net_mode() {
@@ -204,6 +222,7 @@ const char *net_mode() {
 }
 
 String net_ip() { return mode == "sta" ? WiFi.localIP().toString() : WiFi.softAPIP().toString(); }
+const String &net_api_token() { return apiToken; }
 int net_peers() { return mode == "sta" ? WiFi.status() == WL_CONNECTED : WiFi.softAPgetStationNum(); }
 bool net_up() { return mode == "sta" ? WiFi.status() == WL_CONNECTED : true; }
 

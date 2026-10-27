@@ -36,7 +36,8 @@ When the link drops, the board releases all buttons/keys (same as before).
 {"up":123456,"rst":"power-on","heap":81234,"psram":6200000,"usb":"ok|asleep|off",
  "net":"ap|sta|none","ip":"192.168.4.1","sta":1,
  "ap":"idle|connected|streaming","w":480,"h":1040,"kbps":180,"fps":4.8,"idr":2000,"gop":42000,
- "ble":{"mtu":247,"phy":2,"kbps":350,"drop":0,"rdrop":0,"n":1}}
+ "ble":{"mtu":247,"phy":2,"kbps":350,"drop":0,"rdrop":0,"n":1},
+ "wifi":{"up":1,"auth":1,"kbps":12,"err":0,"autherr":0}}
 ```
 `kbps` = AirPlay video bitrate in, `ble.kbps` = video bytes out over BLE, `idr` = ms between IDRs, `gop` = bytes buffered since last IDR.
 `rst` = reset reason of the current boot (`power-on|brownout|watchdog|crash|software|usb|other`), `up` = ms since boot.
@@ -57,8 +58,9 @@ board timestamp (ms) for latency stats, followed by the Annex-B data.
 `seq` increments per notify; the app counts gaps as drops and waits for the next IDR/CONFIG after a gap.
 
 ## net (JSON)
-Read: `{"mode":"ap","ssid":"ESP32Agent-1A2B","pass":"<random 12 chars>","ip":"192.168.4.1"}`
-(SoftAP credentials are generated once at first boot and kept in NVS).
+Read: `{"mode":"ap","ssid":"ESP32Agent-1A2B","pass":"<random 12 chars>","ip":"192.168.4.1","port":8765,"token":"<32 hex chars>"}`
+(SoftAP credentials and the independent Wi-Fi API token are generated once at first boot and kept in NVS).
+The encrypted BLE read is the provisioning channel for the authenticated [Wi-Fi transport](wifi-protocol.md).
 Write `{"mode":"ap"}` or `{"mode":"sta","ssid":"...","pass":"..."}` — stored in NVS, board restarts Wi-Fi.
 
 ## AirPlay

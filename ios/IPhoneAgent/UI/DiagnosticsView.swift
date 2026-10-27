@@ -5,6 +5,7 @@ struct DiagnosticsView: View {
     @ObservedObject var app: AppModel
     @ObservedObject var metrics: Metrics
     @ObservedObject var board: BoardLink
+    @ObservedObject var wifi: WiFiBoardLink
     @ObservedObject var feed: VideoFeed
     @State private var busy = false
     @State private var shareURL: URL?
@@ -26,6 +27,14 @@ struct DiagnosticsView: View {
                 row("PHY", board.status?.ble?.phy.map { "\($0)M" } ?? "–")
                 row("Drops (app / board)", "\(metrics.drops) / \(board.status?.ble?.drop.map(String.init) ?? "–")")
                 row("Status age", String(format: "%.1f s", metrics.statusAge))
+            }
+            SwiftUI.Section("Wi-Fi link (alpha.1)") {
+                row("State", wifi.state.rawValue)
+                row("Round trip", wifi.roundTripMilliseconds.map { String(format: "%.1f ms", $0) } ?? "–")
+                row("Board TCP kbps", f(wifi.status?.wifi?.kbps))
+                row("Protocol errors", wifi.status?.wifi?.err.map(String.init) ?? "–")
+                row("Authentication failures", wifi.status?.wifi?.autherr.map(String.init) ?? "–")
+                if !wifi.lastError.isEmpty { Text(wifi.lastError).font(.caption) }
             }
             SwiftUI.Section("Video") {
                 row("AirPlay kbps", f(board.status?.kbps))

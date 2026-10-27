@@ -15,6 +15,7 @@ import UIKit
 
     let settings = Settings()
     let board = BoardLink(mock: MockMode.on)
+    let wifi = WiFiBoardLink()
     let feed = VideoFeed()
     let metrics = Metrics()
     let traces = MockMode.on
@@ -107,6 +108,7 @@ import UIKit
             self?.modelResponseSeconds = nil
         }
         board.onVideo = { [weak self] in self?.feed.receive($0) }
+        board.onNet = { [weak self] in self?.wifi.configure($0) }
         board.onStatus = { [weak self] s in
             self?.statusRefreshError = nil
             self?.feed.mirroring = s.ap == "streaming"

@@ -4,9 +4,26 @@
 #include <string.h>
 #include "../hid_bridge/src/bplist/bplist.h"
 #include "../hid_bridge/src/video/gop.h"
+#include "../hid_bridge/src/wifi/wire.h"
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { fails++; printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); } } while (0)
+
+static void test_wifi_wire(void) {
+  iaw_header src = {IAW_COMMAND, 0xA5, 0x10203, 0x11223344, 0x55667788};
+  uint8_t buf[IAW_HEADER_LEN];
+  iaw_encode_header(buf, &src);
+  CHECK(!memcmp(buf, "IAW1", 4));
+  iaw_header got = {0};
+  CHECK(iaw_decode_header(buf, &got));
+  CHECK(got.type == src.type && got.flags == src.flags);
+  CHECK(got.payload_len == src.payload_len && got.seq == src.seq && got.board_ms == src.board_ms);
+  buf[0] = 'X';
+  CHECK(!iaw_decode_header(buf, &got));
+  iaw_encode_header(buf, &src);
+  buf[8] = 1; buf[9] = 0; buf[10] = 1; buf[11] = 0;  // 65,537 bytes
+  CHECK(!iaw_decode_header(buf, &got));
+}
 
 static void test_bplist_roundtrip(void) {
   bp_writer w;
@@ -146,6 +163,7 @@ static void test_chunker(void) {
 }
 
 int main(void) {
+  test_wifi_wire();
   test_bplist_roundtrip();
   test_bplist_utf16();
   test_gop();

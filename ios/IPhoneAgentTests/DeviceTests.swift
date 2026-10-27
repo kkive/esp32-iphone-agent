@@ -101,6 +101,31 @@ import XCTest
         XCTAssertEqual(s.fps, 4.8)
     }
 
+    func testWiFiFramesRoundTripWhenFragmented() throws {
+        let a = WiFiFrameCodec.encode(type: .helloReply, sequence: 7, boardMilliseconds: 123, payload: Data("ok".utf8))
+        let b = WiFiFrameCodec.encode(type: .status, sequence: 0, boardMilliseconds: 124,
+                                      payload: Data(#"{"up":124}"#.utf8))
+        var parser = WiFiFrameParser()
+        XCTAssertTrue(try parser.append(a.prefix(9)).isEmpty)
+        XCTAssertTrue(try parser.append(a.dropFirst(9).prefix(8)).isEmpty)
+        let frames = try parser.append(a.dropFirst(17) + b)
+        XCTAssertEqual(frames.count, 2)
+        XCTAssertEqual(frames[0], WiFiFrame(type: .helloReply, flags: 0, sequence: 7,
+                                           boardMilliseconds: 123, payload: Data("ok".utf8)))
+        XCTAssertEqual(frames[1].type, .status)
+    }
+
+    func testWiFiParserRejectsBadMagicAndOversizedPayload() throws {
+        var parser = WiFiFrameParser()
+        var bad = WiFiFrameCodec.encode(type: .ping, sequence: 1)
+        bad[0] = 0
+        XCTAssertThrowsError(try parser.append(bad))
+        var large = WiFiFrameCodec.encode(type: .ping, sequence: 1)
+        large[8] = 1; large[9] = 0; large[10] = 1; large[11] = 0
+        parser = WiFiFrameParser()
+        XCTAssertThrowsError(try parser.append(large))
+    }
+
     func testPointerRehomesEveryTenGestures() async throws {
         let device = FakeDevice()
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")

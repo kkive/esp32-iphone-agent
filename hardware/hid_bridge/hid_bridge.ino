@@ -18,6 +18,7 @@
 #include "ble_hid.h"
 #include "netcfg.h"
 #include "video_link.h"
+#include "wifi_link.h"
 #include "src/airplay/airplay.h"
 
 const int STEP = 10;      // max pointer delta per report while moving
@@ -318,16 +319,19 @@ String board(const String &line, const String &id) {
 String statusJson(bool full) {
   static const char *apStates[] = {"idle", "connected", "streaming"};
   VideoStats v = video_stats();
-  char s[384];
+  WiFiLinkStats wl = wifi_link_stats();
+  char s[512];
   snprintf(s, sizeof s,
            "{\"up\":%lu,\"rst\":\"%s\",\"heap\":%u,\"psram\":%u,\"usb\":\"%s\",\"hid\":\"%s\",\"net\":\"%s\",\"ip\":\"%s\",\"sta\":%d,"
            "\"ap\":\"%s\",\"w\":%u,\"h\":%u,\"kbps\":%lu,\"fps\":%.1f,\"idr\":%lu,\"gop\":%lu,"
-           "\"ble\":{\"mtu\":%u,\"phy\":%u,\"kbps\":%lu,\"drop\":%lu,\"rdrop\":%lu,\"n\":%d}}",
+           "\"ble\":{\"mtu\":%u,\"phy\":%u,\"kbps\":%lu,\"drop\":%lu,\"rdrop\":%lu,\"n\":%d},"
+           "\"wifi\":{\"up\":%d,\"auth\":%d,\"kbps\":%lu,\"err\":%lu,\"autherr\":%lu}}",
            millis(), resetReason(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), inputState(), hidMode.c_str(), net_mode(), net_ip().c_str(), net_peers(),
            apStates[airplay_state()], cfg_width(), cfg_height(), (unsigned long)v.kbps, v.fps, (unsigned long)v.idr_ms,
            (unsigned long)v.gop_bytes, ble_mtu(), ble_phy(), (unsigned long)ble_kbps(), (unsigned long)ble_drops(),
-           (unsigned long)ble_reply_drops(), ble_peers());
+           (unsigned long)ble_reply_drops(), ble_peers(), wl.connected, wl.authenticated, (unsigned long)wl.kbps,
+           (unsigned long)wl.errors, (unsigned long)wl.auth_failures);
   if (full) return s;
   // MTU below ~250 (before the MTU exchange): keep only the fields the app needs to stay alive
   snprintf(s, sizeof s, "{\"up\":%lu,\"rst\":\"%s\",\"usb\":\"%s\",\"net\":\"%s\",\"ap\":\"%s\",\"ble\":{\"mtu\":%u}}",
@@ -338,10 +342,12 @@ String statusJson(bool full) {
 void statusTask(void *) {
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(1000));
-    if (!ble_connected()) continue;
     String s = statusJson(true);
-    if (s.length() > ble_mtu() - 3u) s = statusJson(false);
-    ble_status(s);
+    wifi_link_status(s);
+    if (ble_connected()) {
+      if (s.length() > ble_mtu() - 3u) s = statusJson(false);
+      ble_status(s);
+    }
   }
 }
 
@@ -381,6 +387,7 @@ void setup() {
 
   net_begin();
   if (!video_begin()) Serial.println("video: no PSRAM for the GOP buffer");
+  if (!wifi_link_begin()) Serial.println("wifi-link: start failed");
   ble_begin("ESP32 Agent " + board_suffix());
   startAirplay();
   xTaskCreatePinnedToCore(statusTask, "status", 4096, NULL, 1, NULL, 1);
@@ -411,7 +418,23 @@ void loop() {
     Serial.println(id + " " + board(sp < 0 ? "" : line.substring(sp + 1), id));
     return;
   }
-  if (!ble_pop_cmd(line, 50)) return;
+  uint32_t wifiId = 0;
+  if (wifi_link_pop_cmd(line, wifiId)) {
+    String cmd = line;
+    cmd.trim();
+    int sp = cmd.indexOf(' ');
+    String verb = sp < 0 ? cmd : cmd.substring(0, sp);
+    String reply;
+    // These commands complete later on the BLE video/debug path. Wi-Fi variants arrive in alpha.2.
+    if (verb == "snap" || verb == "bench" || verb == "app" || verb == "log" || verb == "unpair")
+      reply = "err command pending Wi-Fi implementation";
+    else
+      reply = board(cmd, String(wifiId));
+    if (!reply.length()) reply = "err no reply";
+    wifi_link_reply(wifiId, reply);
+    return;
+  }
+  if (!ble_pop_cmd(line, 5)) return;
   int sp = line.indexOf(' ');
   String id = sp < 0 ? line : line.substring(0, sp);
   String rest = sp < 0 ? "" : line.substring(sp + 1);

@@ -10,6 +10,7 @@ String net_json();                       // value of the `net` characteristic
 void net_request(const String &json);    // `net` write; applied by net_poll()
 const char *net_mode();                  // "ap" | "sta" | "none" (station not connected)
 String net_ip();
+const String &net_api_token();           // random 128-bit secret, exposed only by encrypted BLE net characteristic
 int net_peers();                         // stations on our SoftAP, or 1 when connected as a station
 bool net_up();                           // has an IP address
 bool net_coex(const String &pref);       // Wi-Fi/BLE radio share: "bt" | "balance" (boot default) | "wifi"

@@ -74,6 +74,8 @@ extension AppModel {
         hotspotSSID = ssid
         join = .joined
         say("hotspot: joined \(ssid)")
+        wifi.configure(board.net)
+        wifi.reconnect()
     }
 
     /// On the board's network: the current SSID matches, or the board counts a client.
