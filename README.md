@@ -30,9 +30,10 @@ Demo video and updates: [X @iamhenryyuan](https://x.com/iamhenryyuan) · [YouTub
 > tag [`v0.1.0`](https://github.com/onehumanbeing/esp32-iphone-agent/tree/v0.1.0) and branch
 > [`legacy`](https://github.com/onehumanbeing/esp32-iphone-agent/tree/legacy). See [docs/legacy.md](docs/legacy.md).
 
-> **v0.2 Wi-Fi transport preview:** `v0.2.0-alpha.3` carries H.264 and normal control commands over an authenticated
+> **v0.2 Wi-Fi transport preview:** `v0.2.0-beta.1` carries H.264 and normal control commands over an authenticated
 > TCP link, uses BLE heartbeats to restore that link in the background, and immediately returns to BLE when it is
-> unavailable. Request/reply deduplication prevents a retry from repeating a gesture. See [IAW1](docs/wifi-protocol.md).
+> unavailable. Request/reply deduplication prevents a retry from repeating a gesture. The built-in field test measures
+> HID command → decoded frame against the ≤1 second target. See [IAW1](docs/wifi-protocol.md) and [the test checklist](docs/wifi-beta-test.md).
 
 <p align="center"><img src="docs/images/example-alarm.png" alt="An iPhone with a XIAO ESP32S3 plugged in, setting an alarm" width="100%"></p>
 

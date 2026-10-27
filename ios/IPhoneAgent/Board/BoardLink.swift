@@ -22,6 +22,7 @@ import Foundation
     @Published private(set) var net: NetConfig?
     @Published private(set) var lastError = ""
     @Published private(set) var signalStrength: Int?
+    @Published private(set) var commandPath = "BLE"
 
     let commands = CommandChannel()
     var onVideo: ((Data) -> Void)?
@@ -251,7 +252,8 @@ import Foundation
 
     func write(_ line: String) throws {
         if mock, connected { return mockReply(line) }
-        if useWiFi(for: line), wifiWrite?(line) == true { return }
+        if useWiFi(for: line), wifiWrite?(line) == true { commandPath = "Wi-Fi"; return }
+        commandPath = "BLE"
         guard let peripheral, let c = chars[BoardUUID.cmd], connected else {
             throw DeviceError(message: "board not connected")
         }
@@ -264,7 +266,8 @@ import Foundation
     var maxWrite: Int { wifiCommandReady ? 512 : peripheral?.maximumWriteValueLength(for: .withoutResponse) ?? 20 }
 
     func writeIfIdle(_ line: String) -> Bool {
-        if useWiFi(for: line), wifiWrite?(line) == true { return true }
+        if useWiFi(for: line), wifiWrite?(line) == true { commandPath = "Wi-Fi"; return true }
+        commandPath = "BLE"
         guard !mock, let peripheral, let c = chars[BoardUUID.cmd], connected,
               c.properties.contains(.writeWithoutResponse), peripheral.canSendWriteWithoutResponse else { return false }
         let data = Data(line.utf8)

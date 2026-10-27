@@ -15,6 +15,7 @@ struct DiagnosticsView: View {
             SwiftUI.Section("Tests") {
                 test("BLE bench (256 KB)", "speedometer") { await app.bench() }
                 test("Snap latency", "camera.viewfinder") { await app.snapTest() }
+                test("Wi-Fi HID → frame", "arrow.triangle.2.circlepath") { await app.wifiLoopTest() }
                 test("LLM ping", "bolt") { await app.pingLLM() }
                 test("Background test (10 min)", "moon.zzz") { await app.backgroundTest() }
                 Button { export() } label: { Label("Export traces", systemImage: "square.and.arrow.up") }
@@ -30,7 +31,9 @@ struct DiagnosticsView: View {
             }
             SwiftUI.Section("Wi-Fi link") {
                 row("State", wifi.state.rawValue)
+                row("Command path", board.commandPath)
                 row("Round trip", wifi.roundTripMilliseconds.map { String(format: "%.1f ms", $0) } ?? "–")
+                row("HID → decoded frame", metrics.wifiLoopMs.map { String(format: "%.0f ms", $0) } ?? "–")
                 row("App-side video kbps", f(metrics.wifiKbps))
                 row("Board TCP kbps", f(wifi.status?.wifi?.kbps))
                 row("Protocol errors", wifi.status?.wifi?.err.map(String.init) ?? "–")

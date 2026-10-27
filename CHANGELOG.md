@@ -2,6 +2,13 @@
 
 ## Unreleased (main)
 
+### v0.2.0-beta.1 Full-loop field test
+
+- Runs the existing agent, pointer calibration and recovery logic on the Wi-Fi video/command path without changing user prompts.
+- Added an on-device HID-to-decoded-frame acceptance test with the ≤1 second foreground target and trace metric.
+- Shows the active command path, Wi-Fi video throughput, RTT and protocol errors together in Diagnostics.
+- Added a matching firmware/IPA installation and field-test checklist to each release package.
+
 ### v0.2.0-alpha.3 Wi-Fi commands and background restoration
 
 - Routes normal HID, stream and board-setting commands over Wi-Fi while keeping BLE for asynchronous snapshot/debug operations.

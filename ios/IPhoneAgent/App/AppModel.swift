@@ -258,6 +258,30 @@ import UIKit
         }
     }
 
+    /// End-to-end acceptance check: Wi-Fi HID command -> AirPlay -> Wi-Fi H.264 -> decoded frame.
+    func wifiLoopTest() async {
+        guard wifi.state == .ready else { return say("Wi-Fi loop: fast link is not ready") }
+        guard feed.mirroring else { return say("Wi-Fi loop: start Screen Mirroring first") }
+        let wasStreaming = feed.streamOn
+        do {
+            if !wasStreaming { try await feed.stream(true) }
+            let started = now()
+            try await board.commands.send("move 10 0")
+            guard await feed.fresh(since: started, timeout: 2) != nil else {
+                throw DeviceError(message: "no decoded frame after the HID action")
+            }
+            let ms = (feed.updated - started) * 1000
+            metrics.wifiLoopMs = ms
+            try await board.commands.send("move -10 0")  // restore pointer position
+            if !wasStreaming { try await feed.stream(false) }
+            say(String(format: "Wi-Fi HID → decoded frame: %.0f ms%@", ms, ms <= 1000 ? " (pass)" : " (>1 s)"))
+        } catch {
+            _ = try? await board.commands.send("move -10 0")
+            if !wasStreaming { try? await feed.stream(false) }
+            say("Wi-Fi loop: \(error.localizedDescription)")
+        }
+    }
+
     /// Shared by pull-to-refresh and character interactions; rapid pokes coalesce.
     func refreshHomeStatus() async {
         guard !refreshingStatus, now() - lastStatusRefresh > 2 else { return }

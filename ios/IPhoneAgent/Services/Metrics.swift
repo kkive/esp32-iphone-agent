@@ -13,6 +13,7 @@ import Foundation
     @Published var mtu = 0
     @Published var drops = 0
     @Published var benchKbps: Double?
+    @Published var wifiLoopMs: Double?
     // video
     @Published var fps = 0.0
     @Published var idrIntervalMs: Double?
@@ -95,6 +96,7 @@ import Foundation
             "steps": steps.map { ["frame_ms": $0.frameMs, "llm_ms": $0.llmMs, "hid_ms": $0.hidMs] },
         ]
         out["bench_kbps"] = benchKbps
+        out["wifi_loop_ms"] = wifiLoopMs
         out["idr_interval_ms"] = idrIntervalMs
         out["snap_ms"] = snapMs
         out["llm_first_ms"] = llmFirstMs

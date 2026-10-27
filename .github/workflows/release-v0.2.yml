@@ -23,7 +23,7 @@ jobs:
         run: |
           mkdir firmware-package
           cp hardware/build/*.bin hardware/flash.sh LICENSE NOTICE firmware-package/
-          cp docs/wifi-protocol.md hardware/tools/wifi_smoke.py firmware-package/
+          cp docs/wifi-protocol.md docs/wifi-beta-test.md hardware/tools/wifi_smoke.py firmware-package/
           cat > firmware-package/FLASH.txt <<'EOF'
           Flash the merged image at offset 0 with esptool 5.x:
             esptool --chip esp32s3 --port PORT write-flash 0x0 hid_bridge.ino.merged.bin
