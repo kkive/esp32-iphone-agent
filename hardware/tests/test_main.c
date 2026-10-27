@@ -10,7 +10,7 @@ static int fails;
 #define CHECK(c) do { if (!(c)) { fails++; printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); } } while (0)
 
 static void test_wifi_wire(void) {
-  iaw_header src = {IAW_COMMAND, 0xA5, 0x10203, 0x11223344, 0x55667788};
+  iaw_header src = {IAW_COMMAND, 0xA5, 0xF203, 0x11223344, 0x55667788};
   uint8_t buf[IAW_HEADER_LEN];
   iaw_encode_header(buf, &src);
   CHECK(!memcmp(buf, "IAW1", 4));
