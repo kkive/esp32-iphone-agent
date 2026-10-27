@@ -72,18 +72,31 @@ const uint8_t REPORT_MAP[] = {
 
 // Input reports are 1 byte report ID + payload (sent with the ID prepended).
 const uint8_t HID_INFO[] = {0x11, 0x00, 0x02};  // v1.1, country 0, normally connectable
-std::atomic<int> hidSubs{0};                    // centrals subscribed to input reports
+std::atomic<int> hidHost{-1};                   // the central whose system HID stack subscribed
+std::atomic<uint8_t> hidReports{0};             // mouse=1, keyboard=2, consumer=4
 
 NimBLECharacteristic *mouseChr, *keysChr, *consChr;
+
+uint8_t reportBit(NimBLECharacteristic *c) {
+  return c == mouseChr ? 1 : c == keysChr ? 2 : c == consChr ? 4 : 0;
+}
 
 class HidCb : public NimBLECharacteristicCallbacks {
   void onSubscribe(NimBLECharacteristic *c, NimBLEConnInfo &ci, uint16_t sub) override {
     bool on = sub & 1;
-    hidSubs += on ? 1 : -1;
-    if (hidSubs < 0) hidSubs = 0;
+    uint8_t bit = reportBit(c);
+    int handle = ci.getConnHandle();
+    if (on) {
+      int none = -1;
+      hidHost.compare_exchange_strong(none, handle);
+      if (hidHost == handle) hidReports |= bit;
+    } else if (hidHost == handle) {
+      hidReports &= ~bit;
+      if (!hidReports) hidHost = -1;
+    }
 #if DEBUG_SERIAL
-    Serial.printf("ble-hid: conn %u %s %s (%d subscribed)\n", ci.getConnHandle(), on ? "sub" : "unsub",
-                  c == mouseChr ? "mouse" : c == keysChr ? "keys" : "consumer", (int)hidSubs);
+    Serial.printf("ble-hid: conn %u %s %s (reports 0x%x)\n", ci.getConnHandle(), on ? "sub" : "unsub",
+                  c == mouseChr ? "mouse" : c == keysChr ? "keys" : "consumer", (unsigned)hidReports.load());
 #endif
     // HID over GATT: the device asks for security; the host then runs its pairing prompt.
     // Without this the host's HID stack subscribes over a plain link and never pairs (spinner).
@@ -142,19 +155,35 @@ void ble_hid_advertise(NimBLEAdvertisementData &data) {
   data.setPartialServices16({NimBLEUUID((uint16_t)0x1812)});
 }
 
-bool ble_hid_connected() { return hidSubs > 0; }
+bool ble_hid_connected() { return hidHost >= 0 && hidReports != 0; }
+
+void ble_hid_disconnected(uint16_t connHandle) {
+  if (hidHost == (int)connHandle) {
+    hidReports = 0;
+    hidHost = -1;
+  }
+}
+
+static bool notifyRetry(NimBLECharacteristic *c, const uint8_t *report, size_t len) {
+  if (!ble_hid_connected()) return false;
+  for (int tries = 0; tries < 10; tries++) {
+    if (c->notify(report, len, (uint16_t)hidHost.load())) return true;
+    delay(2);  // BLE/video coexistence can temporarily fill the controller queue.
+  }
+  return false;
+}
 
 void ble_hid_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel, int8_t pan) {
   const uint8_t r[6] = {1, buttons, (uint8_t)dx, (uint8_t)dy, (uint8_t)wheel, (uint8_t)pan};
-  mouseChr->notify(r, sizeof r);
+  notifyRetry(mouseChr, r, sizeof r);
 }
 
 void ble_hid_keys(uint8_t modifiers, const uint8_t keys[6]) {
   const uint8_t r[9] = {2, modifiers, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5]};
-  keysChr->notify(r, sizeof r);
+  notifyRetry(keysChr, r, sizeof r);
 }
 
 void ble_hid_consumer(uint16_t usage) {
   const uint8_t r[3] = {3, (uint8_t)(usage & 0xFF), (uint8_t)(usage >> 8)};
-  consChr->notify(r, sizeof r);
+  notifyRetry(consChr, r, sizeof r);
 }

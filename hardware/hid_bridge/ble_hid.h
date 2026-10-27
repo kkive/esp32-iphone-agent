@@ -13,6 +13,8 @@ void ble_hid_begin(NimBLEServer *server);
 void ble_hid_advertise(NimBLEAdvertisementData &data);
 // True once a central has enabled notifications on the HID input reports (the host's HID stack).
 bool ble_hid_connected();
+// Clear the HID subscription state when that central disconnects.
+void ble_hid_disconnected(uint16_t connHandle);
 
 // Input reports. Deltas are int8 like the USB reports; buttons is bit 0 = left.
 void ble_hid_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel, int8_t pan);

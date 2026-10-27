@@ -68,15 +68,51 @@ static void hidReleaseAll() {
   if (bleHid()) { bleButtons = 0; const uint8_t none[6] = {0}; ble_hid_keys(0, none); }
   else keyboard.releaseAll();
 }
-// HID usage id -> modifier bit (0xE0..0xE7) or 0; ASCII letters/digits are their own usage.
-static uint8_t modBit(uint8_t c) { return c >= 0xE0 && c <= 0xE7 ? 1 << (c - 0xE0) : 0; }
 static void bleKeys(uint8_t mods, uint8_t a, uint8_t b = 0) {
   const uint8_t k[6] = {a, b, 0, 0, 0, 0};
   ble_hid_keys(mods, k);
 }
-static void hidTypeChar(uint8_t c) {
-  if (bleHid()) { bleKeys(0, c); delay(5); bleKeys(0, 0); }
-  else { keyboard.press(c); delay(5); keyboard.release(c); }
+
+// US keyboard mapping. Low byte is the HID keyboard usage; bit 8 means Left Shift.
+// The Arduino USB keyboard class translates ASCII internally, while BLE reports require
+// raw HID usages, so the BLE backend must do this conversion explicitly.
+static uint16_t asciiHid(uint8_t c) {
+  if (c >= 'a' && c <= 'z') return 0x04 + c - 'a';
+  if (c >= 'A' && c <= 'Z') return 0x100 | (0x04 + c - 'A');
+  if (c >= '1' && c <= '9') return 0x1E + c - '1';
+  if (c == '0') return 0x27;
+  if (c == '\n' || c == '\r') return 0x28;
+  if (c == '\b') return 0x2A;
+  if (c == '\t') return 0x2B;
+  if (c == ' ') return 0x2C;
+  if (c == 0x1B) return 0x29;
+  if (c == 0x7F) return 0x4C;
+  const char *plain = "-=[]\\;',./`";
+  const char *shift = "_+{}|:\"<>?~";
+  const uint8_t usages[] = {0x2D,0x2E,0x2F,0x30,0x31,0x33,0x34,0x36,0x37,0x38,0x35};
+  for (size_t i = 0; i < sizeof usages; i++) {
+    if (c == (uint8_t)plain[i]) return usages[i];
+    if (c == (uint8_t)shift[i]) return 0x100 | usages[i];
+  }
+  const char *digits = "!@#$%^&*()";
+  for (int i = 0; i < 10; i++) if (c == (uint8_t)digits[i]) return 0x100 | (0x1E + i);
+  return 0;
+}
+
+static bool hidTypeChar(uint8_t c) {
+  if (bleHid()) {
+    uint16_t key = asciiHid(c);
+    if (!key) return false;
+    bleKeys(key & 0x100 ? 2 : 0, (uint8_t)key);
+    delay(8);
+    bleKeys(0, 0);
+    delay(8);
+  } else {
+    keyboard.press(c);
+    delay(5);
+    keyboard.release(c);
+  }
+  return true;
 }
 static void hidConsumer(uint16_t usage) {
   if (bleHid()) { ble_hid_consumer(usage); delay(40); ble_hid_consumer(0); }
@@ -116,10 +152,36 @@ bool pressCombo(String combo) {
     uint8_t mods = 0, slots[6] = {0};
     int n = 0;
     for (int i; (i = combo.indexOf('+')) >= 0; combo = combo.substring(i + 1)) {
-      uint8_t c = keyCode(combo.substring(0, i));
-      if (!c || (!modBit(c) && n >= 6)) { ble_hid_keys(0, slots); return false; }
-      if (modBit(c)) mods |= modBit(c);
-      else slots[n++] = c;
+      String token = combo.substring(0, i);
+      uint16_t key = 0;
+      if (token == "cmd") mods |= 8;
+      else if (token == "ctrl") mods |= 1;
+      else if (token == "alt") mods |= 4;
+      else if (token == "shift") mods |= 2;
+      else if (token == "enter") key = 0x28;
+      else if (token == "esc") key = 0x29;
+      else if (token == "tab") key = 0x2B;
+      else if (token == "backspace") key = 0x2A;
+      else if (token == "space") key = 0x2C;
+      else if (token == "up") key = 0x52;
+      else if (token == "down") key = 0x51;
+      else if (token == "left") key = 0x50;
+      else if (token == "right") key = 0x4F;
+      else if (token.length() == 1) {
+        key = asciiHid((uint8_t)token[0]);
+        if (!key) { ble_hid_keys(0, slots); return false; }
+      }
+      else { ble_hid_keys(0, slots); return false; }
+      if (key) {
+        if (key & 0x100) mods |= 2;
+        uint8_t usage = (uint8_t)key;
+        bool duplicate = false;
+        for (int j = 0; j < n; j++) if (slots[j] == usage) duplicate = true;
+        if (!duplicate) {
+          if (n >= 6) { ble_hid_keys(0, slots); return false; }
+          slots[n++] = usage;
+        }
+      }
     }
     ble_hid_keys(mods, slots);
     delay(30);
@@ -163,7 +225,7 @@ String run(const String &line) {
     hidMode = arg;
     return String("ok ") + hidMode + (bleHid() && !ble_hid_connected() ? " (no bluetooth hid host yet)" : "");
   }
-  if (!usbReady()) return bleHid() ? "err no bluetooth hid host (pair the board)" : "err phone usb asleep (unlock the phone)";;
+  if (!usbReady()) return bleHid() ? "err no bluetooth hid host (pair the board)" : "err phone usb asleep (unlock the phone)";
   if (cmd == "home") {  // slam the pointer into the top-left corner
     for (int i = 0; i < HOME_REPORTS; i++) { hidMove(-127, -127); delay(2); }
     return "ok";
@@ -174,7 +236,8 @@ String run(const String &line) {
   if (cmd == "click") { hidPress(); delay(60); hidRelease(); return "ok"; }
   if (cmd == "scroll") { hidScroll(a, b); return "ok"; }
   if (cmd == "type") {
-    for (unsigned i = 0; i < arg.length(); i++) hidTypeChar(arg[i]);
+    if (bleHid()) for (unsigned i = 0; i < arg.length(); i++) if (!asciiHid((uint8_t)arg[i])) return "err type supports ASCII only";
+    for (unsigned i = 0; i < arg.length(); i++) if (!hidTypeChar((uint8_t)arg[i])) return "err type supports ASCII only";
     return "ok";
   }
   if (cmd == "key") return pressCombo(arg) ? "ok" : "err unknown key";
@@ -197,6 +260,13 @@ const char *resetReason() {
 const char *usbState() {
   if (!tud_mounted()) return "off";
   return tud_suspended() ? "asleep" : "ok";
+}
+
+// Compatibility for the existing iOS app: its readiness checks still read the `usb` field.
+// In BLE mode report the effective input channel there, while `hid` exposes the selected mode.
+const char *inputState() {
+  if (bleHid()) return ble_hid_connected() ? "ok" : "off";
+  return usbState();
 }
 
 // Board-level commands from the app; everything else is an HID command for run().
@@ -254,14 +324,14 @@ String statusJson(bool full) {
            "\"ap\":\"%s\",\"w\":%u,\"h\":%u,\"kbps\":%lu,\"fps\":%.1f,\"idr\":%lu,\"gop\":%lu,"
            "\"ble\":{\"mtu\":%u,\"phy\":%u,\"kbps\":%lu,\"drop\":%lu,\"rdrop\":%lu,\"n\":%d}}",
            millis(), resetReason(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), usbState(), hidMode.c_str(), net_mode(), net_ip().c_str(), net_peers(),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), inputState(), hidMode.c_str(), net_mode(), net_ip().c_str(), net_peers(),
            apStates[airplay_state()], cfg_width(), cfg_height(), (unsigned long)v.kbps, v.fps, (unsigned long)v.idr_ms,
            (unsigned long)v.gop_bytes, ble_mtu(), ble_phy(), (unsigned long)ble_kbps(), (unsigned long)ble_drops(),
            (unsigned long)ble_reply_drops(), ble_peers());
   if (full) return s;
   // MTU below ~250 (before the MTU exchange): keep only the fields the app needs to stay alive
   snprintf(s, sizeof s, "{\"up\":%lu,\"rst\":\"%s\",\"usb\":\"%s\",\"net\":\"%s\",\"ap\":\"%s\",\"ble\":{\"mtu\":%u}}",
-           millis(), resetReason(), usbState(), net_mode(), apStates[airplay_state()], ble_mtu());
+           millis(), resetReason(), inputState(), net_mode(), apStates[airplay_state()], ble_mtu());
   return s;
 }
 

@@ -117,6 +117,7 @@ class ServerCb : public NimBLEServerCallbacks {
     if (peerCount() < MAX_PEERS) NimBLEDevice::startAdvertising();  // room for the debug harness
   }
   void onDisconnect(NimBLEServer *s, NimBLEConnInfo &ci, int reason) override {
+    ble_hid_disconnected(ci.getConnHandle());
     int i = slotOf(ci.getConnHandle());
     if (i >= 0) {
       for (int c = 0; c < CH_COUNT; c++) subscribed[i][c] = false;
