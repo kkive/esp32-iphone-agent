@@ -9,6 +9,7 @@ import Foundation
     @Published var statusAge = 0.0  // s since the last status notify
     // BLE, measured in the app
     @Published var bleKbps = 0.0
+    @Published var wifiKbps = 0.0
     @Published var mtu = 0
     @Published var drops = 0
     @Published var benchKbps: Double?
@@ -30,7 +31,7 @@ import Foundation
     @Published var backgroundAlive = 0.0  // s alive in background (current or last stint)
     @Published var suspensions = 0
 
-    private var windowBytes = 0, windowFrames = 0
+    private var windowBytes = 0, windowWiFiBytes = 0, windowFrames = 0
     private var windowStart = now()
     private var lastIDR: Double?
     private var lastTick = now()
@@ -42,6 +43,7 @@ import Foundation
     }
 
     func videoBytes(_ n: Int) { windowBytes += n }
+    func wifiVideoBytes(_ n: Int) { windowWiFiBytes += n }
     func videoDrops(_ n: Int) { drops += n }
     func frameDecoded(ms: Double) {
         windowFrames += 1
@@ -74,8 +76,9 @@ import Foundation
         lastTick = t
         let span = max(t - windowStart, 0.001)
         bleKbps = Double(windowBytes) * 8 / 1000 / span
+        wifiKbps = Double(windowWiFiBytes) * 8 / 1000 / span
         fps = Double(windowFrames) / span
-        windowBytes = 0; windowFrames = 0; windowStart = t
+        windowBytes = 0; windowWiFiBytes = 0; windowFrames = 0; windowStart = t
         statusAge = lastStatus.map { t - $0 } ?? 0
         if let since = backgroundSince { backgroundAlive = t - since }
     }
@@ -86,7 +89,7 @@ import Foundation
     /// Everything as JSON-ready values, for metrics.json.
     func snapshot() -> [String: Any] {
         var out: [String: Any] = [
-            "ble_kbps_app": bleKbps, "mtu": mtu, "drops": drops, "fps": fps, "decode_ms": decodeMs,
+            "ble_kbps_app": bleKbps, "wifi_kbps_app": wifiKbps, "mtu": mtu, "drops": drops, "fps": fps, "decode_ms": decodeMs,
             "decode_errors": decodeErrors, "background_decode_errors": backgroundDecodeErrors,
             "background_alive_s": backgroundAlive, "suspensions": suspensions, "hid_ms": hidMs,
             "steps": steps.map { ["frame_ms": $0.frameMs, "llm_ms": $0.llmMs, "hid_ms": $0.hidMs] },

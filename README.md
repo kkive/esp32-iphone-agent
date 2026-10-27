@@ -30,9 +30,9 @@ Demo video and updates: [X @iamhenryyuan](https://x.com/iamhenryyuan) · [YouTub
 > tag [`v0.1.0`](https://github.com/onehumanbeing/esp32-iphone-agent/tree/v0.1.0) and branch
 > [`legacy`](https://github.com/onehumanbeing/esp32-iphone-agent/tree/legacy). See [docs/legacy.md](docs/legacy.md).
 
-> **v0.2 Wi-Fi transport preview:** `v0.2.0-alpha.1` adds an authenticated TCP link between the board and app for
-> status, RTT diagnostics and framed commands. H.264 still uses the established BLE path in this first milestone;
-> Wi-Fi H.264 plus automatic BLE fallback follows in `alpha.2`. See [the IAW1 protocol](docs/wifi-protocol.md).
+> **v0.2 Wi-Fi transport preview:** `v0.2.0-alpha.2` moves H.264 from the board to the app over an authenticated
+> TCP link and automatically returns to BLE if that socket drops. Status, RTT diagnostics and framed commands share
+> the same connection. See [the IAW1 protocol](docs/wifi-protocol.md).
 
 <p align="center"><img src="docs/images/example-alarm.png" alt="An iPhone with a XIAO ESP32S3 plugged in, setting an alarm" width="100%"></p>
 

@@ -28,9 +28,10 @@ struct DiagnosticsView: View {
                 row("Drops (app / board)", "\(metrics.drops) / \(board.status?.ble?.drop.map(String.init) ?? "–")")
                 row("Status age", String(format: "%.1f s", metrics.statusAge))
             }
-            SwiftUI.Section("Wi-Fi link (alpha.1)") {
+            SwiftUI.Section("Wi-Fi link") {
                 row("State", wifi.state.rawValue)
                 row("Round trip", wifi.roundTripMilliseconds.map { String(format: "%.1f ms", $0) } ?? "–")
+                row("App-side video kbps", f(metrics.wifiKbps))
                 row("Board TCP kbps", f(wifi.status?.wifi?.kbps))
                 row("Protocol errors", wifi.status?.wifi?.err.map(String.init) ?? "–")
                 row("Authentication failures", wifi.status?.wifi?.autherr.map(String.init) ?? "–")

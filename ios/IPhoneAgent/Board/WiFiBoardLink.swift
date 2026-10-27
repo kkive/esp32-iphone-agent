@@ -12,6 +12,8 @@ import Network
     @Published private(set) var status: BoardStatus?
 
     var onStatus: ((BoardStatus) -> Void)?
+    var onVideo: ((AccessUnit) -> Void)?
+    var onReady: ((Bool) -> Void)?
     private let queue = DispatchQueue(label: "iphone-agent-wifi-link")
     private var connection: NWConnection?
     private var parser = WiFiFrameParser()
@@ -41,6 +43,7 @@ import Network
         retry?.cancel(); pinger?.cancel()
         connection?.cancel(); connection = nil
         state = .idle
+        onReady?(false)
         parser = WiFiFrameParser()
     }
 
@@ -51,6 +54,7 @@ import Network
         retry?.cancel(); pinger?.cancel(); connection?.cancel()
         parser = WiFiFrameParser(); pingStarted = [:]
         state = .connecting; lastError = ""
+        onReady?(false)
         let link = NWConnection(host: NWEndpoint.Host(host), port: rawPort, using: .tcp)
         connection = link
         link.stateUpdateHandler = { [weak self, weak link] newState in
@@ -92,12 +96,19 @@ import Network
                 return failed("Wi-Fi authentication failed", attempt: attempt)
             }
             state = .ready
+            onReady?(true)
             startPings(attempt)
         case .status:
             if let new = BoardStatus.decode(frame.payload) {
                 status = status?.merged(with: new) ?? new
                 onStatus?(status!)
             }
+        case .videoConfig:
+            onVideo?(AccessUnit(data: frame.payload, idr: false, config: true, snap: false,
+                                boardMs: frame.boardMilliseconds))
+        case .videoAU:
+            onVideo?(AccessUnit(data: frame.payload, idr: frame.flags & 1 != 0, config: false, snap: false,
+                                boardMs: frame.boardMilliseconds))
         case .pong:
             if let started = pingStarted.removeValue(forKey: frame.sequence) {
                 roundTripMilliseconds = (now() - started) * 1000
@@ -133,6 +144,7 @@ import Network
     private func failed(_ message: String, attempt: Int) {
         guard generation == attempt else { return }
         state = .failed; lastError = message
+        onReady?(false)
         connection?.cancel(); connection = nil
         pinger?.cancel()
         retry?.cancel()

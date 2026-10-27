@@ -21,7 +21,7 @@ static void test_wifi_wire(void) {
   buf[0] = 'X';
   CHECK(!iaw_decode_header(buf, &got));
   iaw_encode_header(buf, &src);
-  buf[8] = 1; buf[9] = 0; buf[10] = 1; buf[11] = 0;  // 65,537 bytes
+  buf[8] = 1; buf[9] = 0; buf[10] = 8; buf[11] = 0;  // 524,289 bytes
   CHECK(!iaw_decode_header(buf, &got));
 }
 

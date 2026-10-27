@@ -122,9 +122,21 @@ import XCTest
         bad[0] = 0
         XCTAssertThrowsError(try parser.append(bad))
         var large = WiFiFrameCodec.encode(type: .ping, sequence: 1)
-        large[8] = 1; large[9] = 0; large[10] = 1; large[11] = 0
+        large[8] = 1; large[9] = 0; large[10] = 8; large[11] = 0
         parser = WiFiFrameParser()
         XCTAssertThrowsError(try parser.append(large))
+    }
+
+    func testWiFiVideoFrameKeepsIDRFlagTimestampAndPayload() throws {
+        let payload = Data([0, 0, 0, 1, 0x65, 9])
+        let data = WiFiFrameCodec.encode(type: .videoAU, sequence: 99, boardMilliseconds: 4567,
+                                         payload: payload, flags: 1)
+        var parser = WiFiFrameParser()
+        let frame = try XCTUnwrap(parser.append(data).first)
+        XCTAssertEqual(frame.type, .videoAU)
+        XCTAssertEqual(frame.flags & 1, 1)
+        XCTAssertEqual(frame.boardMilliseconds, 4567)
+        XCTAssertEqual(frame.payload, payload)
     }
 
     func testPointerRehomesEveryTenGestures() async throws {

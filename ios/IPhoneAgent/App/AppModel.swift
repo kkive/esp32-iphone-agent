@@ -109,6 +109,8 @@ import UIKit
         }
         board.onVideo = { [weak self] in self?.feed.receive($0) }
         board.onNet = { [weak self] in self?.wifi.configure($0) }
+        wifi.onVideo = { [weak self] in self?.feed.receiveWiFi($0) }
+        wifi.onReady = { [weak self] in self?.feed.wifiReady($0) }
         board.onStatus = { [weak self] s in
             self?.statusRefreshError = nil
             self?.feed.mirroring = s.ap == "streaming"

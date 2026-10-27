@@ -2,6 +2,7 @@
 #include "video_link.h"
 #include <esp_heap_caps.h>
 #include "ble_link.h"
+#include "wifi_link.h"
 #include "src/video/gop.h"
 
 // GOP since the latest IDR; overflow drops it until the next IDR. A still screen gets an IDR only every
@@ -30,7 +31,7 @@ static volatile uint32_t statKbps, statIdrMs, statAt;
 static volatile float statFps;
 
 // One access unit as notifies. A failed chunk still consumes its seq, so the app sees a gap.
-static bool sendAu(const uint8_t *p, size_t n, uint8_t flags, uint32_t ts) {
+static bool sendBleAu(const uint8_t *p, size_t n, uint8_t flags, uint32_t ts) {
   size_t room = min(ble_video_room(), MAX_CHUNK);
   if (room < 5) return false;
   vchunk c;
@@ -75,12 +76,12 @@ static String doSnap() {
     size_t cfg_len;
     int n;
     if (!snapshot(&gen, &n, cfg, &cfg_len, &cfg_ts)) return "err no video (start screen mirroring)";
-    if (!sendAu(cfg, cfg_len, VF_CONFIG | VF_SNAP, cfg_ts)) return "err ble send failed";
+    if (!sendBleAu(cfg, cfg_len, VF_CONFIG | VF_SNAP, cfg_ts)) return "err ble send failed";
     bool complete = true;
     for (int i = 0; i < n && complete; i++) {
       gop_au au;
       complete = copyAu(gen, i, &au);
-      if (complete && !sendAu(scratch, au.len, VF_SNAP | (au.idr ? VF_IDR : 0), au.ts)) return "err ble send failed";
+      if (complete && !sendBleAu(scratch, au.len, VF_SNAP | (au.idr ? VF_IDR : 0), au.ts)) return "err ble send failed";
     }
     if (complete) return "ok";  // else a new IDR replaced the GOP mid-send: start over with it
   }
@@ -112,7 +113,13 @@ static void streamStep() {
   static uint32_t txGen = UINT32_MAX;
   static int next;
   static uint8_t cfg[GOP_CFG_MAX];
-  if (!streaming || !ble_video_room()) {
+  static bool lastWiFi;
+  bool useWiFi = wifi_link_video_ready();
+  if (useWiFi != lastWiFi) {
+    txGen = UINT32_MAX;  // the new transport starts with config + the current GOP
+    lastWiFi = useWiFi;
+  }
+  if (!streaming || (!useWiFi && !ble_video_room())) {
     txGen = UINT32_MAX;  // resend config + whole GOP when streaming resumes
     return;
   }
@@ -123,10 +130,15 @@ static void streamStep() {
   if (gen != txGen) {
     txGen = gen;
     next = 0;
-    if (!sendAu(cfg, cfg_len, VF_CONFIG, cfg_ts)) { txGen = UINT32_MAX; return; }
+    bool sent = useWiFi ? wifi_link_send_video(true, false, cfg_ts, cfg, cfg_len)
+                        : sendBleAu(cfg, cfg_len, VF_CONFIG, cfg_ts);
+    if (!sent) { txGen = UINT32_MAX; return; }
   }
-  for (gop_au au; next < n && copyAu(gen, next, &au); next++)
-    if (!sendAu(scratch, au.len, au.idr ? VF_IDR : 0, au.ts)) { txGen = UINT32_MAX; return; }
+  for (gop_au au; next < n && copyAu(gen, next, &au); next++) {
+    bool sent = useWiFi ? wifi_link_send_video(false, au.idr, au.ts, scratch, au.len)
+                        : sendBleAu(scratch, au.len, au.idr ? VF_IDR : 0, au.ts);
+    if (!sent) { txGen = UINT32_MAX; return; }
+  }
 }
 
 static void videoTask(void *) {

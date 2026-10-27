@@ -8,7 +8,7 @@
 
 #define IAW_MAGIC "IAW1"
 #define IAW_HEADER_LEN 20u
-#define IAW_MAX_PAYLOAD (64u * 1024u)
+#define IAW_MAX_PAYLOAD (512u * 1024u)
 
 #ifdef __cplusplus
 extern "C" {

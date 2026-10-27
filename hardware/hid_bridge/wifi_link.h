@@ -17,4 +17,6 @@ bool wifi_link_pop_cmd(String &command, uint32_t &request_id);
 void wifi_link_reply(uint32_t request_id, const String &reply);
 void wifi_link_status(const String &json);
 WiFiLinkStats wifi_link_stats();
+bool wifi_link_video_ready();
+bool wifi_link_send_video(bool config, bool idr, uint32_t board_ms, const uint8_t *data, size_t len);
 

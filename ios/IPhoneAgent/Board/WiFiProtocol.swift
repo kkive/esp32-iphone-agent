@@ -15,7 +15,7 @@ struct WiFiFrame: Equatable {
 
 enum WiFiFrameCodec {
     static let headerLength = 20
-    static let maximumPayload = 65_536
+    static let maximumPayload = 512 * 1_024
 
     static func encode(type: WiFiMessage, sequence: UInt32, boardMilliseconds: UInt32 = 0,
                        payload: Data = Data(), flags: UInt8 = 0) -> Data {

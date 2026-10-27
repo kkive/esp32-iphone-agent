@@ -29,7 +29,7 @@ def recv_exact(sock: socket.socket, size: int) -> bytes:
 
 def recv_frame(sock: socket.socket) -> tuple[int, int, int, bytes]:
     magic, kind, flags, header_len, length, seq, board_ms = HEADER.unpack(recv_exact(sock, HEADER.size))
-    if magic != MAGIC or header_len != HEADER.size or length > 65536:
+    if magic != MAGIC or header_len != HEADER.size or length > 524288:
         raise ValueError("bad frame header")
     return kind, seq, board_ms, recv_exact(sock, length)
 

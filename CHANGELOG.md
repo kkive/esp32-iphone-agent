@@ -2,6 +2,13 @@
 
 ## Unreleased (main)
 
+### v0.2.0-alpha.2 Wi-Fi H.264
+
+- Streams complete Annex-B H.264 configuration/access units over the authenticated Wi-Fi socket.
+- Starts every Wi-Fi session with SPS/PPS plus the current GOP, then follows live access units.
+- Automatically changes the firmware stream back to BLE after a Wi-Fi socket failure; the app accepts BLE immediately.
+- Added Wi-Fi video throughput diagnostics and frame/protocol tests.
+
 ### v0.2.0-alpha.1 Wi-Fi transport foundation
 
 - Added the authenticated `IAW1` TCP service on port 8765, using a per-board 128-bit token provisioned through encrypted BLE.

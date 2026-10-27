@@ -69,6 +69,7 @@ extension ScreenSource {
 
     private var assembler = VideoAssembler()
     private let decoder = H264Decoder()
+    private var wifiAvailable = false
 
     init() {
         decoder.onFrame = { [weak self] f in DispatchQueue.main.async { self?.publish(f) } }
@@ -90,6 +91,7 @@ extension ScreenSource {
     /// One `video` notify from BoardLink.
     func receive(_ chunk: Data) {
         metrics?.videoBytes(chunk.count)
+        if wifiAvailable { return }  // Wi-Fi is primary; queued BLE chunks may describe an older frame.
         let dropsBefore = assembler.drops
         let unit = assembler.add(chunk)
         if assembler.drops > dropsBefore { metrics?.videoDrops(assembler.drops - dropsBefore); broken = true }
@@ -97,6 +99,20 @@ extension ScreenSource {
         if !unit.snap { boardClock(ms: Int(unit.boardMs)) }  // snap units are resent late: their ages say nothing
         if unit.idr { metrics?.idrSeen() }
         decoder.queue.async { [decoder] in decoder.decode(unit) }
+    }
+
+    /// One complete Annex-B access unit from the authenticated Wi-Fi link.
+    func receiveWiFi(_ unit: AccessUnit) {
+        metrics?.wifiVideoBytes(unit.data.count)
+        boardClock(ms: Int(unit.boardMs))
+        if unit.idr { metrics?.idrSeen() }
+        decoder.queue.async { [decoder] in decoder.decode(unit) }
+    }
+
+    /// Selects Wi-Fi immediately when authenticated and BLE immediately after a Wi-Fi drop.
+    func wifiReady(_ ready: Bool) {
+        wifiAvailable = ready
+        if !ready { assembler.reset() }
     }
 
     /// The link (re)connected: chunk numbering starts over.
