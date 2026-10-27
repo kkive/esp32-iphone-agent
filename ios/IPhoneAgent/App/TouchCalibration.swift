@@ -8,7 +8,13 @@ extension AutoCalibrator {
     enum TouchResult { case done(Double), noTaps, failed(String) }
 
     static let roughStops = [150, 350]
-    static let targets: [(Double, Double)] = [(0.25, 0.25), (0.75, 0.25), (0.5, 0.5), (0.25, 0.75), (0.75, 0.75)]
+    // Nine points make the fit stable across the usable screen instead of looking accurate around only
+    // one manual point. They stay clear of the status bar, home indicator and rounded corners.
+    static let targets: [(Double, Double)] = [
+        (0.2, 0.2), (0.5, 0.2), (0.8, 0.2),
+        (0.2, 0.5), (0.5, 0.5), (0.8, 0.5),
+        (0.2, 0.8), (0.5, 0.8), (0.8, 0.8)
+    ]
     static let check = (x: 0.5, y: 0.62)
     static let tapTimeout = 3.0
 
@@ -66,6 +72,7 @@ extension AutoCalibrator {
                 pointer.setQuality(error)
                 return .done(error)
             }
+            pointer.refineCalibration(targetX: Self.check.x, targetY: Self.check.y, landed: p)
             return try await touchCalibrate(full: true)
         }
 
@@ -115,19 +122,35 @@ extension AutoCalibrator {
                        "\(Int(DeviceScreen.size.width))×\(Int(DeviceScreen.size.height)) pt @\(Int(DeviceScreen.scale))x"))
         pointer.applyProbe(x: lx, y: ly, samples: samples)
 
-        // stage 3: check with the agent's own move
+        // stage 3: check with the agent's own move. A high residual used to be reported as success;
+        // instead learn the measured miss and retry from home, then reject a still-inaccurate fit.
         phase = .verifying
-        try await pointer.point(Self.check.x, Self.check.y)
-        let sent = now()
-        try await device.send("click")
-        clicks += 1
-        progress = Progress(done: clicks, total: total)
-        guard let p = await probe.tap(since: sent, timeout: Self.tapTimeout) else { return .done(max(lx.rms, ly.rms)) }
-        let error = max(abs(p.x - Self.check.x), abs(p.y - Self.check.y))
-        pointer.setQuality(error)
-        app.say(String(format: "probe check at (%.2f, %.2f): landed (%.3f, %.3f), ±%.1f%%", Self.check.x, Self.check.y,
-                       p.x, p.y, error * 100))
-        return .done(error)
+        var lastError = max(lx.rms, ly.rms)
+        var checkHits = 0
+        for attempt in 1...3 {
+            if attempt > 1 { total += 1 }
+            try await pointer.reset()
+            try await pointer.point(Self.check.x, Self.check.y)
+            let sent = now()
+            try await device.send("click")
+            clicks += 1
+            progress = Progress(done: clicks, total: total)
+            guard let p = await probe.tap(since: sent, timeout: Self.tapTimeout) else {
+                app.say("probe check \(attempt): no tap")
+                continue
+            }
+            checkHits += 1
+            lastError = max(abs(p.x - Self.check.x), abs(p.y - Self.check.y))
+            pointer.setQuality(lastError)
+            app.say(String(format: "probe check %d at (%.2f, %.2f): landed (%.3f, %.3f), ±%.1f%%", attempt,
+                           Self.check.x, Self.check.y, p.x, p.y, lastError * 100))
+            if lastError <= Self.tolerance { return .done(lastError) }
+            pointer.refineCalibration(targetX: Self.check.x, targetY: Self.check.y, landed: p)
+        }
+        if checkHits == 0 { return .failed(String(localized: "The verification click did not reach the calibration screen.")) }
+        pointer.setQuality(lastError)
+        return .failed(String(format: String(localized: "Accuracy is still ±%.1f%%. Set AssistiveTouch tracking speed to the middle, then try again."),
+                                     lastError * 100))
     }
 }
 

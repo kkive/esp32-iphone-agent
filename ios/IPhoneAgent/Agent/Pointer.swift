@@ -152,6 +152,17 @@ import Foundation
         save()
     }
 
+    /// Learn from a measured calibration check. `fix` converts the requested target into the fraction
+    /// actually sent before this sample is appended; pairing that command with the landing lets the next
+    /// check remove a remaining scale/offset miss.
+    func refineCalibration(targetX: Double, targetY: Double, landed: CGPoint) {
+        let commandedX = fix(targetX, "x"), commandedY = fix(targetY, "y")
+        guard max(abs(Double(landed.x) - targetX), abs(Double(landed.y) - targetY)) < 0.2 else { return }
+        remember("x", (commandedX, Double(landed.x)))
+        remember("y", (commandedY, Double(landed.y)))
+        save()
+    }
+
     /// Calibration plus the observed landings, so the correction survives a restart.
     private func save() {
         guard let span else { return }

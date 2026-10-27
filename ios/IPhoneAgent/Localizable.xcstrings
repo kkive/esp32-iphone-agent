@@ -2088,6 +2088,26 @@
         }
       }
     },
+    "Accuracy is still ±%.1f%%. Set AssistiveTouch tracking speed to the middle, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "精度仍为 ±%.1f%%。请把辅助触控的跟踪速度调到中间，然后重试。"
+          }
+        }
+      }
+    },
+    "The verification click did not reach the calibration screen." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验证点击没有到达校准页面。"
+          }
+        }
+      }
+    },
     "It's the grey dot, near the top left." : {
       "localizations" : {
         "zh-Hans" : {

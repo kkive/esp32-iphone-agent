@@ -58,6 +58,7 @@ import UIKit
         let p = app.pointer
         guard p.calibrated else { return true }
         if let aspect = p.aspect, abs(aspect - DeviceScreen.aspect) > 0.02 { return true }
+        guard let quality = p.quality, quality <= Self.tolerance else { return true }
         return p.drift > Self.tolerance
     }
 
@@ -205,7 +206,15 @@ import UIKit
                 if let p = await app.probe.tap(since: since, timeout: 1) {
                     app.say(String(format: "calibration: tapped the pointer at (%.3f, %.3f)", p.x, p.y))
                     app.pointer.finishCalibration(x: p.x, y: p.y, unitsX: manualUnits.x, unitsY: manualUnits.y)
-                    return finished(app.pointer.quality ?? 0.01)
+                    do {
+                        switch try await touchCalibrate(full: false) {
+                        case .done(let error): return finished(error)
+                        case .noTaps: return failed(String(localized: "The verification click did not reach the calibration screen."))
+                        case .failed(let why): return failed(why)
+                        }
+                    } catch {
+                        return failed(error.localizedDescription)
+                    }
                 }
             }
         }
