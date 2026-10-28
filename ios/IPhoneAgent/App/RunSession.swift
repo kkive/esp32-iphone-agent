@@ -193,7 +193,8 @@ extension AppModel {
     func agentFinished() {
         ended()
         if let last = agent.steps.last { say("finished: \(last["action"]?.str ?? "") \(last["reason"]?.str ?? last["answer"]?.str ?? "")") }
-        Task { try? await feed.stream(false) }
+        // Keep forwarding while mirroring remains active. An unstructured delayed stream-off here can
+        // arrive after the next run's stream-on and silently leave it without frames.
         endBackgroundTask()
     }
 
