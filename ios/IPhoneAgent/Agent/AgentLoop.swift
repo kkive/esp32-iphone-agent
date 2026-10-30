@@ -265,6 +265,12 @@ extension Pointer: Gestures {}
             }
             if name != "done" && name != "fail" {
                 try await gate?()
+                // The model may take seconds to answer; re-check video before acting on its screenshot.
+                // If the stream dropped during inference, discard the action and request a fresh look.
+                guard screen?.live == true else {
+                    _ = try await waitForScreen()
+                    return false
+                }
                 onDoing?(.acting(act))  // the thought (on the first act) names the target
                 let started = now()
                 try await perform(act)

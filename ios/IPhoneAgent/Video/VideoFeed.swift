@@ -64,6 +64,7 @@ extension ScreenSource {
     private(set) var broken = false
     private var clockOffset: Double?  // local s − board s, the smallest seen (≈ the link latency)
     var mirroring = false  // board status says ap == streaming
+    @Published private(set) var waitingForKeyframe = false
     var metrics: Metrics?
     weak var device: HIDDevice?
 
@@ -83,7 +84,16 @@ extension ScreenSource {
         }
     }
 
-    var live: Bool { mirroring && frame != nil && (device?.connected ?? false) }
+    var live: Bool { mirroring && !waitingForKeyframe && frame != nil && (device?.connected ?? false) }
+
+    func updateKeyframeStatus(_ waiting: Bool?) {
+        guard let waiting else { return }
+        if waiting && !waitingForKeyframe {
+            DebugLog.write("video: board is waiting for a keyframe; discard stale screen")
+            clearFrame()
+        }
+        waitingForKeyframe = waiting
+    }
 
     /// Drop the last image when mirroring stops, so a later connection never presents an old screen as live.
     func clearFrame() { frame = nil; updated = 0; capturedAt = 0; broken = false }
@@ -136,6 +146,7 @@ extension ScreenSource {
     }
 
     private func publish(_ f: H264Decoder.Frame) {
+        guard !waitingForKeyframe else { return }
         frame = f.jpeg
         updated = now()
         capturedAt = clockOffset.map { Double(f.unit.boardMs) / 1000 + $0 } ?? updated
@@ -161,6 +172,7 @@ extension ScreenSource {
     /// once with a longer timeout. Returns where the frame came from, for the log.
     @discardableResult
     func currentFrame(maxAge: Double = 1, wait: Double = 3) async throws -> String {
+        if waitingForKeyframe { throw DeviceError(message: "waiting for video keyframe; restart Screen Mirroring") }
         if streamOn && mirroring {
             if frame != nil && now() - updated < maxAge { return "live" }
             if await fresh(since: now() - maxAge, timeout: wait) != nil { return "live (waited)" }

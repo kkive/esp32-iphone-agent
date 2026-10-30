@@ -115,7 +115,7 @@ struct HomeView: View {
     private var hero: some View {
         VStack(spacing: Space.m) {
             Group {
-                if board.connected, board.status?.ap == "streaming", let jpeg = feed.frame,
+                if board.connected, board.status?.ap == "streaming", !feed.waitingForKeyframe, let jpeg = feed.frame,
                    let image = UIImage(data: jpeg) {
                     Image(uiImage: image).resizable().scaledToFit()
                         .frame(width: 128, height: 220)

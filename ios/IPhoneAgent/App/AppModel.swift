@@ -122,6 +122,7 @@ import UIKit
             self?.statusRefreshError = nil
             if s.ap != "streaming", self?.feed.mirroring == true { self?.feed.clearFrame() }
             self?.feed.mirroring = s.ap == "streaming"
+            self?.feed.updateKeyframeStatus(s.gwait.map { $0 == 1 })
             if let up = s.up { self?.feed.boardClock(ms: up) }
             self?.metrics.status(s)
             self?.logStatus(s)
