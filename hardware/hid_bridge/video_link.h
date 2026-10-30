@@ -13,5 +13,7 @@ void video_bench(const String &id, uint32_t kb);  // replies "<id> ok <ms>"
 struct VideoStats {
   uint32_t kbps, idr_ms, gop_bytes;
   float fps;
+  uint32_t overflows, key_age_ms;
+  bool waiting_key, has_config, has_key;
 };
 VideoStats video_stats();

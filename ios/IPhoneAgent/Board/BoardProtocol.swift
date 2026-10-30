@@ -32,6 +32,7 @@ struct BoardStatus: Codable, Equatable {
     var ap: String?    // idle | connected | streaming
     var w: Int?, h: Int?
     var kbps: Double?, fps: Double?, idr: Int?, gop: Int?
+    var gwait: Int?, gcfg: Int?, gover: Int?, gkey: Int?, gage: Int?
     var ble: BLE?
     var wifi: WiFi?
 
@@ -45,6 +46,8 @@ struct BoardStatus: Codable, Equatable {
         m.usb = n.usb ?? usb; m.net = n.net ?? net; m.ip = n.ip ?? ip; m.sta = n.sta ?? sta; m.ap = n.ap ?? ap
         m.w = n.w ?? w; m.h = n.h ?? h; m.kbps = n.kbps ?? kbps; m.fps = n.fps ?? fps; m.idr = n.idr ?? idr
         m.gop = n.gop ?? gop
+        m.gwait = n.gwait ?? gwait; m.gcfg = n.gcfg ?? gcfg; m.gover = n.gover ?? gover
+        m.gkey = n.gkey ?? gkey; m.gage = n.gage ?? gage
         let a = ble ?? BLE(), b = n.ble ?? BLE()
         m.ble = BLE(mtu: b.mtu ?? a.mtu, phy: b.phy ?? a.phy, kbps: b.kbps ?? a.kbps, drop: b.drop ?? a.drop)
         let wa = wifi ?? WiFi(), wb = n.wifi ?? WiFi()

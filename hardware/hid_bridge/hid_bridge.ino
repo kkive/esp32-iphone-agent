@@ -320,16 +320,18 @@ String statusJson(bool full) {
   static const char *apStates[] = {"idle", "connected", "streaming"};
   VideoStats v = video_stats();
   WiFiLinkStats wl = wifi_link_stats();
-  char s[512];
+  char s[768];
   snprintf(s, sizeof s,
            "{\"up\":%lu,\"rst\":\"%s\",\"heap\":%u,\"psram\":%u,\"usb\":\"%s\",\"hid\":\"%s\",\"net\":\"%s\",\"ip\":\"%s\",\"sta\":%d,"
            "\"ap\":\"%s\",\"w\":%u,\"h\":%u,\"kbps\":%lu,\"fps\":%.1f,\"idr\":%lu,\"gop\":%lu,"
+           "\"gwait\":%d,\"gcfg\":%d,\"gover\":%lu,\"gkey\":%d,\"gage\":%lu,"
            "\"ble\":{\"mtu\":%u,\"phy\":%u,\"kbps\":%lu,\"drop\":%lu,\"rdrop\":%lu,\"n\":%d},"
            "\"wifi\":{\"up\":%d,\"auth\":%d,\"kbps\":%lu,\"err\":%lu,\"autherr\":%lu}}",
            millis(), resetReason(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), inputState(), hidMode.c_str(), net_mode(), net_ip().c_str(), net_peers(),
            apStates[airplay_state()], cfg_width(), cfg_height(), (unsigned long)v.kbps, v.fps, (unsigned long)v.idr_ms,
-           (unsigned long)v.gop_bytes, ble_mtu(), ble_phy(), (unsigned long)ble_kbps(), (unsigned long)ble_drops(),
+           (unsigned long)v.gop_bytes, v.waiting_key, v.has_config, (unsigned long)v.overflows,
+           v.has_key, (unsigned long)v.key_age_ms, ble_mtu(), ble_phy(), (unsigned long)ble_kbps(), (unsigned long)ble_drops(),
            (unsigned long)ble_reply_drops(), ble_peers(), wl.connected, wl.authenticated, (unsigned long)wl.kbps,
            (unsigned long)wl.errors, (unsigned long)wl.auth_failures);
   if (full) return s;

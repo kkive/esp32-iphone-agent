@@ -75,7 +75,15 @@ static String doSnap() {
     uint32_t gen, cfg_ts;
     size_t cfg_len;
     int n;
-    if (!snapshot(&gen, &n, cfg, &cfg_len, &cfg_ts)) return "err no video (start screen mirroring)";
+    if (!snapshot(&gen, &n, cfg, &cfg_len, &cfg_ts)) {
+      xSemaphoreTake(lock, portMAX_DELAY);
+      bool config = gop.cfg_len > 0, waiting = gop.wait_idr;
+      uint32_t overflows = gop.overflows;
+      xSemaphoreGive(lock);
+      if (!config) return "err missing video codec configuration";
+      if (waiting) return overflows ? "err waiting for keyframe after GOP overflow" : "err waiting for first keyframe";
+      return "err no buffered video";
+    }
     if (!sendBleAu(cfg, cfg_len, VF_CONFIG | VF_SNAP, cfg_ts)) return "err ble send failed";
     bool complete = true;
     for (int i = 0; i < n && complete; i++) {
@@ -209,6 +217,10 @@ VideoStats video_stats() {
   bool fresh = millis() - statAt < 3000;  // mirroring stopped: report zeros, not stale numbers
   xSemaphoreTake(lock, portMAX_DELAY);
   uint32_t gopBytes = gop.used;
+  uint32_t overflows = gop.overflows;
+  bool waiting = gop.wait_idr, config = gop.cfg_len > 0;
   xSemaphoreGive(lock);
-  return {fresh ? statKbps : 0, statIdrMs, gopBytes, fresh ? statFps : 0};
+  uint32_t key = lastIdr;
+  return {fresh ? statKbps : 0, statIdrMs, gopBytes, fresh ? statFps : 0,
+          overflows, key ? millis() - key : 0, waiting, config, key != 0};
 }

@@ -172,6 +172,17 @@ import XCTest
         XCTAssertEqual(m.ble?.phy, 2)
     }
 
+    func testKeyframeDiagnosticsSurviveShortStatus() throws {
+        let full = try XCTUnwrap(BoardStatus.decode(Data(#"{"gwait":1,"gcfg":1,"gover":3,"gkey":1,"gage":12345}"#.utf8)))
+        let short = try XCTUnwrap(BoardStatus.decode(Data(#"{"up":42}"#.utf8)))
+        let merged = full.merged(with: short)
+        XCTAssertEqual(merged.gwait, 1)
+        XCTAssertEqual(merged.gcfg, 1)
+        XCTAssertEqual(merged.gover, 3)
+        XCTAssertEqual(merged.gkey, 1)
+        XCTAssertEqual(merged.gage, 12345)
+    }
+
     func testFreshCalibrationHasNoDriftAndSurvivesARestart() {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         let pointer = Pointer(device: FakeDevice(), calibrationFile: file)
