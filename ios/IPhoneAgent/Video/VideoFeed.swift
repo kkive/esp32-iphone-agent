@@ -85,6 +85,9 @@ extension ScreenSource {
 
     var live: Bool { mirroring && frame != nil && (device?.connected ?? false) }
 
+    /// Drop the last image when mirroring stops, so a later connection never presents an old screen as live.
+    func clearFrame() { frame = nil; updated = 0; capturedAt = 0; broken = false }
+
     /// Frame width / height (portrait iPhone as a fallback).
     var aspect: Double { size.width > 0 && size.height > 0 ? size.width / size.height : 9 / 19.5 }
 

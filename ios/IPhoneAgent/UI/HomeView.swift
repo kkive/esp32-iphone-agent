@@ -114,10 +114,19 @@ struct HomeView: View {
 
     private var hero: some View {
         VStack(spacing: Space.m) {
-            PokeableFace(mood: editing ? .listening : app.mood, look: lookAt, busy: app.agent.running,
-                         onInteract: { Task { await app.refreshHomeStatus() } })
-                .frame(width: 128, height: 143)
-                .padding(.top, Space.s)
+            Group {
+                if board.connected, board.status?.ap == "streaming", let jpeg = feed.frame,
+                   let image = UIImage(data: jpeg) {
+                    Image(uiImage: image).resizable().scaledToFit()
+                        .frame(width: 128, height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .accessibilityLabel(Text("Live screen preview"))
+                } else {
+                    PokeableFace(mood: editing ? .listening : app.mood, look: lookAt, busy: app.agent.running,
+                                 onInteract: { Task { await app.refreshHomeStatus() } })
+                        .frame(width: 128, height: 143)
+                }
+            }.padding(.top, Space.s)
             Text(greeting)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

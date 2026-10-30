@@ -72,6 +72,8 @@ import UIKit
     private var lastStatus = ""
     private var lastTick = now()
     private var lastStreamLog = 0.0
+    private var previewStarting = false
+    private var previewAttemptAt = 0.0
     private var timers: [Task<Void, Never>] = []
     var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     var lastWidgetReload = 0.0
@@ -118,11 +120,13 @@ import UIKit
         wifi.onReply = { [weak self] in self?.board.commands.handleReply($0) }
         board.onStatus = { [weak self] s in
             self?.statusRefreshError = nil
+            if s.ap != "streaming", self?.feed.mirroring == true { self?.feed.clearFrame() }
             self?.feed.mirroring = s.ap == "streaming"
             if let up = s.up { self?.feed.boardClock(ms: up) }
             self?.metrics.status(s)
             self?.logStatus(s)
             self?.wifi.wake()
+            self?.startIdlePreviewIfNeeded()
         }
         board.onLinkUp = { [weak self] in
             guard let self else { return }
@@ -150,7 +154,10 @@ import UIKit
         notifier.onAction = { [weak self] action, run in self?.notificationAction(action, run: run) }
         wireRecovery()
 
-        timers.append(Task { [weak self] in await self?.board.commands.keepAwake(screenLive: { self?.feed.live ?? false }) })
+        timers.append(Task { [weak self] in
+            await self?.board.commands.keepAwake(screenLive: { self?.feed.live ?? false },
+                                                 taskActive: { self?.agent.running ?? false })
+        })
         timers.append(Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -172,6 +179,23 @@ import UIKit
         runs.reload()
         handleLaunchArguments()
         publishWidget()
+    }
+
+    /// Show live video on the assistant page even between runs. Do not interfere with calibration,
+    /// recording or an active run's selected stream/snapshot mode.
+    private func startIdlePreviewIfNeeded() {
+        guard !MockMode.on, UIApplication.shared.applicationState == .active, tab == .agent,
+              board.connected, feed.mirroring, !feed.streamOn, !agent.running, !startingAgent,
+              !recorder.recording, !calibrator.boardOpen, !previewStarting,
+              now() - previewAttemptAt > 5 else { return }
+        previewStarting = true
+        previewAttemptAt = now()
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.previewStarting = false }
+            do { try await self.feed.stream(true) }
+            catch { DebugLog.write("preview: stream start failed: \(error.localizedDescription)") }
+        }
     }
 
     /// Every second: metrics; a suspension note; the stream's numbers every 10 s while a run goes.

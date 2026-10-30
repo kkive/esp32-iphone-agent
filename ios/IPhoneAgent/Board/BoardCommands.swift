@@ -215,13 +215,15 @@ extension BoardTransport {
 
     /// While idle: ping every few seconds, so a board that went away shows as gone within seconds, and nudge
     /// the pointer now and then so the phone does not auto-lock. Runs until cancelled.
-    func keepAwake(idle: Double = 25, heartbeat: Double = 2, screenLive: @escaping () -> Bool) async {
+    func keepAwake(idle: Double = 25, heartbeat: Double = 2, screenLive: @escaping () -> Bool,
+                   taskActive: @escaping () -> Bool) async {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: UInt64(heartbeat * 1e9))
             if !connected || now() - beat < heartbeat { continue }
             do {
                 // nudge only a phone that is awake and mirroring: there is nothing to keep awake otherwise
-                if now() - last > idle && screenLive() {
+                if now() - last > idle && screenLive() && taskActive() {
+                    DebugLog.write("keep-awake: task active, nudging pointer")
                     try await send("move 1 0")
                     try await send("move -1 0")
                 } else {
