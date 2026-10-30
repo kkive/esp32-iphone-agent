@@ -1,6 +1,7 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Plan before executing" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "提前规划任务" } } } },
     "Waiting for keyframe" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "等待关键帧" } } } },
     "Video configuration received" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已收到视频编码参数" } } } },
     "GOP overflows since boot" : { "localizations" : { "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启动后视频缓存溢出次数" } } } },

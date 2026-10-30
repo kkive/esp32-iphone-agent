@@ -1,6 +1,7 @@
 // Mirrored H.264 from AirPlay to BLE, see video_link.h.
 #include "video_link.h"
 #include <esp_heap_caps.h>
+#include <atomic>
 #include "ble_link.h"
 #include "wifi_link.h"
 #include "src/video/gop.h"
@@ -30,6 +31,25 @@ static uint32_t winStart, winBytes, winFrames, lastIdr;
 static volatile uint32_t statKbps, statIdrMs, statAt;
 static volatile float statFps;
 
+// A bounded live queue is independent of the replay GOP. A full replay cache must not stop a
+// decoder which already received its IDR and every following AU. Only this task sends video.
+struct LiveAU { uint8_t *data; size_t len; uint32_t serial, ts, epoch; bool idr; };
+static QueueHandle_t liveQueue;
+static uint32_t auSerial;
+static size_t liveBytes;
+static const size_t LIVE_CAP = 768 * 1024;
+static std::atomic<uint32_t> liveEpoch{0};
+static std::atomic<bool> liveSynced{false};
+
+static void loseLiveSync() { liveSynced = false; liveEpoch++; }
+
+static void freeLive(LiveAU &au) {
+  heap_caps_free(au.data);
+  xSemaphoreTake(lock, portMAX_DELAY);
+  liveBytes -= au.len;
+  xSemaphoreGive(lock);
+}
+
 // One access unit as notifies. A failed chunk still consumes its seq, so the app sees a gap.
 static bool sendBleAu(const uint8_t *p, size_t n, uint8_t flags, uint32_t ts) {
   size_t room = min(ble_video_room(), MAX_CHUNK);
@@ -57,13 +77,15 @@ static bool copyAu(uint32_t gen, int i, gop_au *au) {
 }
 
 // Snapshot of the GOP state: generation, AU count, SPS/PPS.
-static bool snapshot(uint32_t *gen, int *n, uint8_t *cfg, size_t *cfg_len, uint32_t *cfg_ts) {
+static bool snapshot(uint32_t *gen, int *n, uint8_t *cfg, size_t *cfg_len, uint32_t *cfg_ts,
+                     uint32_t *serial = nullptr) {
   xSemaphoreTake(lock, portMAX_DELAY);
   *gen = gop.gen;
   *n = gop.wait_idr ? 0 : gop.n;
   *cfg_len = gop.cfg_len;
   *cfg_ts = gop.cfg_ts;
   memcpy(cfg, gop.cfg, gop.cfg_len);
+  if (serial) *serial = auSerial;
   xSemaphoreGive(lock);
   return *n > 0 && *cfg_len > 0;
 }
@@ -118,34 +140,61 @@ static String doBench(uint32_t kb) {
 // can't be skipped: each needs the one before, and the next IDR may be minutes away). After a failed
 // send, start over from the GOP's IDR.
 static void streamStep() {
-  static uint32_t txGen = UINT32_MAX;
-  static int next;
+  static uint32_t sentSerial, epoch;
   static uint8_t cfg[GOP_CFG_MAX];
   static bool lastWiFi;
   bool useWiFi = wifi_link_video_ready();
   if (useWiFi != lastWiFi) {
-    txGen = UINT32_MAX;  // the new transport starts with config + the current GOP
+    loseLiveSync();  // a different decoder/transport must receive a complete chain
     lastWiFi = useWiFi;
   }
+  auto send = [useWiFi](bool config, bool idr, uint32_t ts, const uint8_t *p, size_t len) {
+    return useWiFi ? wifi_link_send_video(config, idr, ts, p, len)
+                   : sendBleAu(p, len, config ? VF_CONFIG : idr ? VF_IDR : 0, ts);
+  };
   if (!streaming || (!useWiFi && !ble_video_room())) {
-    txGen = UINT32_MAX;  // resend config + whole GOP when streaming resumes
+    liveSynced = false;
+    LiveAU old;
+    while (xQueueReceive(liveQueue, &old, 0) == pdTRUE) freeLive(old);
     return;
   }
-  uint32_t gen, cfg_ts;
-  size_t cfg_len;
-  int n;
-  if (!snapshot(&gen, &n, cfg, &cfg_len, &cfg_ts)) return;
-  if (gen != txGen) {
-    txGen = gen;
-    next = 0;
-    bool sent = useWiFi ? wifi_link_send_video(true, false, cfg_ts, cfg, cfg_len)
-                        : sendBleAu(cfg, cfg_len, VF_CONFIG, cfg_ts);
-    if (!sent) { txGen = UINT32_MAX; return; }
+  if (epoch != liveEpoch.load()) { liveSynced = false; epoch = liveEpoch.load(); }
+  if (!liveSynced) {
+    uint32_t gen, cfg_ts, watermark;
+    size_t cfg_len;
+    int n;
+    if (snapshot(&gen, &n, cfg, &cfg_len, &cfg_ts, &watermark)) {
+      bool ok = send(true, false, cfg_ts, cfg, cfg_len);
+      for (int i = 0; ok && i < n; i++) {
+        gop_au au;
+        ok = copyAu(gen, i, &au) && send(false, au.idr, au.ts, scratch, au.len);
+      }
+      if (!ok || epoch != liveEpoch.load()) { loseLiveSync(); return; }
+      sentSerial = watermark;
+      liveSynced = true;
+    }
   }
-  for (gop_au au; next < n && copyAu(gen, next, &au); next++) {
-    bool sent = useWiFi ? wifi_link_send_video(false, au.idr, au.ts, scratch, au.len)
-                        : sendBleAu(scratch, au.len, au.idr ? VF_IDR : 0, au.ts);
-    if (!sent) { txGen = UINT32_MAX; return; }
+  LiveAU au;
+  // Bound each pass so snap/bench and control replies are not starved.
+  for (int i = 0; i < 96 && xQueueReceive(liveQueue, &au, 0) == pdTRUE; i++) {
+    if (au.epoch != epoch) { freeLive(au); continue; }
+    if (!liveSynced && au.idr) {
+      xSemaphoreTake(lock, portMAX_DELAY);
+      size_t len = gop.cfg_len;
+      memcpy(cfg, gop.cfg, len);
+      xSemaphoreGive(lock);
+      if (len && send(true, false, au.ts, cfg, len)) {
+        sentSerial = au.serial - 1;
+        liveSynced = true;
+      }
+    }
+    bool ok = true;
+    if (liveSynced && (int32_t)(au.serial - sentSerial) > 0) {
+      ok = au.serial == sentSerial + 1 && send(false, au.idr, au.ts, au.data, au.len);
+      if (ok) sentSerial = au.serial;
+    }
+    freeLive(au);
+    if (!ok || epoch != liveEpoch.load()) { loseLiveSync(); return; }
   }
 }
 
@@ -172,10 +221,13 @@ bool video_begin() {
   gop_init(&gop, arena, GOP_CAP, aus, MAX_AUS);
   lock = xSemaphoreCreateMutex();
   reqs = xQueueCreate(4, sizeof(Req));
+  liveQueue = xQueueCreate(96, sizeof(LiveAU));
+  if (!lock || !reqs || !liveQueue) return false;
   return xTaskCreatePinnedToCore(videoTask, "video", 6 * 1024, NULL, 2, &task, 1) == pdPASS;
 }
 
 void video_on_config(const uint8_t *sps_pps, size_t len) {
+  loseLiveSync();
   xSemaphoreTake(lock, portMAX_DELAY);
   gop_set_config(&gop, sps_pps, len, millis());
   xSemaphoreGive(lock);
@@ -198,11 +250,27 @@ void video_on_au(const uint8_t *au, size_t len, bool idr) {
   }
   xSemaphoreTake(lock, portMAX_DELAY);
   gop_push(&gop, au, len, idr, now);
+  uint32_t serial = ++auSerial;
+  // Never drop a live dependency silently. A queue or memory failure invalidates the chain;
+  // the consumer then replays a complete GOP or waits for a genuine IDR.
+  if (streaming) {
+    uint8_t *copy = len <= LIVE_CAP - liveBytes
+        ? (uint8_t *)heap_caps_malloc(len, MALLOC_CAP_SPIRAM) : nullptr;
+    if (copy) {
+      memcpy(copy, au, len);
+      LiveAU item = {copy, len, serial, now, liveEpoch.load(), idr};
+      if (xQueueSend(liveQueue, &item, 0) == pdTRUE) liveBytes += len;
+      else { heap_caps_free(copy); loseLiveSync(); }
+    } else loseLiveSync();
+  }
   xSemaphoreGive(lock);
   xTaskNotifyGive(task);
 }
 
-void video_stream(bool on) { streaming = on; }
+void video_stream(bool on) {
+  if (on != streaming) loseLiveSync();
+  streaming = on;
+}
 
 static void request(const String &id, bool bench, uint32_t kb) {
   Req r = {{0}, kb, bench};
@@ -218,7 +286,7 @@ VideoStats video_stats() {
   xSemaphoreTake(lock, portMAX_DELAY);
   uint32_t gopBytes = gop.used;
   uint32_t overflows = gop.overflows;
-  bool waiting = gop.wait_idr, config = gop.cfg_len > 0;
+  bool waiting = gop.wait_idr && !liveSynced.load(), config = gop.cfg_len > 0;
   xSemaphoreGive(lock);
   uint32_t key = lastIdr;
   return {fresh ? statKbps : 0, statIdrMs, gopBytes, fresh ? statFps : 0,

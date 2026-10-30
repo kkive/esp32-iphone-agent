@@ -32,6 +32,8 @@ struct SettingsView: View {
                     Text("ESP32 Agent follows your iPhone's language. To change it just for this app, open Settings › ESP32 Agent › Language.")
                 }
                 Section {
+                    Toggle("Plan before executing", isOn: $settings.planningEnabled)
+                        .disabled(agentBusy)
                     Button { UIApplication.shared.open(URL(string: UIApplication.openNotificationSettingsURLString)!) } label: {
                         HStack {
                             SettingsLabel(title: "Notifications", symbol: "bell.badge.fill", color: .red)
@@ -69,6 +71,8 @@ struct SettingsView: View {
             .navigationTitle("Settings")
         }
     }
+
+    private var agentBusy: Bool { app.agent.running || app.startingAgent }
 
     private func row(_ title: LocalizedStringKey, _ symbol: String, _ color: Color, value: String?) -> some View {
         HStack {

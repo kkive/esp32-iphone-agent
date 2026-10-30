@@ -35,8 +35,9 @@ extension AppModel {
             return
         }
         do {
+            agent.planningEnabled = settings.planningEnabled
             agent.actor = try await settings.client("actor")
-            agent.planner = try await settings.client("planner")
+            agent.planner = settings.planningEnabled ? try await settings.client("planner") : nil
         } catch {
             say("LLM: \(error.localizedDescription)")
             return

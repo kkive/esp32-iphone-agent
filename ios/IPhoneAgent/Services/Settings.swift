@@ -23,6 +23,7 @@ import UIKit
     /// The model picked from the endpoint's list when `model` is empty (forgotten when the endpoint or key changes).
     @Published private(set) var autoModel: String { didSet { defaults.set(autoModel, forKey: "autoModel") } }
     @Published var plannerModel: String { didSet { defaults.set(plannerModel, forKey: "plannerModel"); configurationRevision += 1 } }  // "" = model
+    @Published var planningEnabled: Bool { didSet { defaults.set(planningEnabled, forKey: "planningEnabled") } }
     @Published var actorModel: String { didSet { defaults.set(actorModel, forKey: "actorModel"); configurationRevision += 1 } }        // "" = model
     @Published var tokenParam: String { didSet { defaults.set(tokenParam, forKey: "tokenParam"); configurationRevision += 1 } }        // auto | ...
     @Published var extraBody: String { didSet { defaults.set(extraBody, forKey: "extraBody"); configurationRevision += 1 } }          // JSON object
@@ -57,6 +58,7 @@ import UIKit
         model = Self.stored(defaults.string(forKey: "model")) ?? preset("IAPresetModel") ?? Self.defaultModel
         autoModel = defaults.string(forKey: "autoModel") ?? ""
         plannerModel = defaults.string(forKey: "plannerModel") ?? ""
+        planningEnabled = defaults.object(forKey: "planningEnabled") as? Bool ?? true
         actorModel = defaults.string(forKey: "actorModel") ?? ""
         tokenParam = defaults.string(forKey: "tokenParam") ?? "auto"
         extraBody = defaults.string(forKey: "extraBody") ?? "{}"

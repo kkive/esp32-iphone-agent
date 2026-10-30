@@ -3,6 +3,29 @@ import XCTest
 
 /// Port of server/tests/test_agent.py.
 @MainActor final class AgentTests: XCTestCase {
+    func testReactiveRunSkipsPlannerAndPlanInPrompt() async throws {
+        let actor = FakeModel { _ in "THINK: Finished\nDO: done ok" }
+        let planner = FakeModel { _ in "1. This must never be requested" }
+        let screen = FakeScreen()
+        let agent = AgentLoop(phone: FakeGestures(), screen: screen, actor: actor, planner: planner, trace: nil)
+        agent.planningEnabled = false
+        try await agent.replan(stuck: true)
+        await agent.run()
+        XCTAssertTrue(planner.prompts.isEmpty)
+        XCTAssertEqual(actor.prompts.count, 1)
+        XCTAssertFalse(actor.prompts[0].contains("Plan:"))
+        XCTAssertTrue(actor.prompts[0].contains("Recent actions:"))
+        XCTAssertEqual(agent.steps.last?["action"], .str("done"))
+    }
+
+    func testPlanningPreferencePersists() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let settings = Settings(defaults: defaults, info: nil)
+        XCTAssertTrue(settings.planningEnabled)
+        settings.planningEnabled = false
+        XCTAssertFalse(Settings(defaults: defaults, info: nil).planningEnabled)
+    }
+
     func testPlannerTimeoutRetriesOnceAndChecksGateAgain() async throws {
         let model = TimeoutModel(failures: 1)
         let agent = AgentLoop(phone: nil, screen: FakeScreen(), actor: model, planner: model, trace: nil)

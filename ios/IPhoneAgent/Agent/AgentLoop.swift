@@ -31,6 +31,7 @@ extension Pointer: Gestures {}
     let phone: Gestures?
     let screen: ScreenSource?
     var actor: ChatModel?, planner: ChatModel?
+    var planningEnabled = true
     let trace: TraceStore?
     let maxSteps: Int, maxFailures: Int
     var metrics: Metrics?
@@ -317,6 +318,7 @@ extension Pointer: Gestures {}
     }
 
     func replan(stuck: Bool = false) async throws {
+        guard planningEnabled else { plan = ""; return }
         guard let planner else { throw LLMError(message: "no planner model") }
         var prompt = "Goal: \(task)"
         if stuck {
@@ -340,7 +342,9 @@ extension Pointer: Gestures {}
                 : s["changed"] == .bool(false) ? " -> screen did NOT change" : ""
             return String(PyJSON.dumps(s.without(hidden)).prefix(300)) + effect
         }.joined(separator: "\n")
-        var prompt = "Goal: \(task)\n\nPlan:\n\(plan)\n\nRecent actions:\n\(history.isEmpty ? "(none)" : history)\n\nNext action?"
+        var prompt = "Goal: \(task)"
+        if planningEnabled { prompt += "\n\nPlan:\n\(plan)" }
+        prompt += "\n\nRecent actions:\n\(history.isEmpty ? "(none)" : history)\n\nNext action?"
         var reply = ""
         for attempt in 0..<3 {  // retry unparseable replies, a little less deterministically
             let (text, seconds, frame) = try await ask("actor", actor, actorPrompt, prompt, temperature: 0.4 * Double(attempt))
