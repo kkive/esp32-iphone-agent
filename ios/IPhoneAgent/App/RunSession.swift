@@ -176,6 +176,8 @@ extension AppModel {
         case .failed:
             let why = last?["reason"]?.str ?? ""
             notifier.post(.failed, title: String(localized: "Not finished: \(why)"), body: summary, run: runID)
+        case .stopped:
+            notifier.post(.stopped, title: String(localized: "Task stopped"), body: summary, run: runID)
         default: break
         }
         if let intent = currentIntent {

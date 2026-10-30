@@ -4,7 +4,7 @@ import UserNotifications
 /// Local notifications for runs: done / failed / needs help / mirroring lost / board disconnected, with
 /// actions (Review, Retry, Stop, Continue, Skip, Take over). Tapping one opens the run's review.
 @MainActor final class Notifier: NSObject, UNUserNotificationCenterDelegate {
-    enum Kind: String { case done, failed, help, takeover, mirroring, board, wifi }
+    enum Kind: String { case done, failed, stopped, help, takeover, mirroring, board, wifi }
     enum Action: String { case review, retry, stop, resume, skip, takeOver }
 
     /// Called with the action (nil = the notification itself was tapped) and the run id.
@@ -27,6 +27,7 @@ import UserNotifications
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Kind.done.rawValue, actions: [review], intentIdentifiers: []),
             UNNotificationCategory(identifier: Kind.failed.rawValue, actions: [review, retry], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Kind.stopped.rawValue, actions: [review], intentIdentifiers: []),
             UNNotificationCategory(identifier: Kind.help.rawValue, actions: [takeOver, skip, stop], intentIdentifiers: []),
             UNNotificationCategory(identifier: Kind.takeover.rawValue, actions: [resume, stop], intentIdentifiers: []),
             UNNotificationCategory(identifier: Kind.mirroring.rawValue, actions: [stop, review], intentIdentifiers: []),

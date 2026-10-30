@@ -91,11 +91,13 @@ extension ScreenSource {
     /// One `video` notify from BoardLink.
     func receive(_ chunk: Data) {
         metrics?.videoBytes(chunk.count)
-        if wifiAvailable { return }  // Wi-Fi is primary; queued BLE chunks may describe an older frame.
         let dropsBefore = assembler.drops
         let unit = assembler.add(chunk)
         if assembler.drops > dropsBefore { metrics?.videoDrops(assembler.drops - dropsBefore); broken = true }
         guard let unit else { return }
+        // Snap is explicitly requested on BLE even when Wi-Fi carries the live stream.
+        // Discarding all BLE data here also discarded recovery snapshots.
+        if wifiAvailable && !unit.snap { return }
         if !unit.snap { boardClock(ms: Int(unit.boardMs)) }  // snap units are resent late: their ages say nothing
         if unit.idr { metrics?.idrSeen() }
         decoder.queue.async { [decoder] in decoder.decode(unit) }
