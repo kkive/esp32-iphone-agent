@@ -15,6 +15,7 @@ final class H264Decoder: @unchecked Sendable {  // confined to `queue`
 
     var onFrame: ((Frame) -> Void)?
     var onError: ((String) -> Void)?
+    var onRecoveryChanged: ((Bool) -> Void)?
     var quality: Double = 0.75
     let queue = DispatchQueue(label: "video.decode")
 
@@ -37,10 +38,16 @@ final class H264Decoder: @unchecked Sendable {  // confined to `queue`
         }
         let status = decodeOne(unit, emit: true)
         guard status != noErr else { return }
+        let recoveryStarted = CFAbsoluteTimeGetCurrent()
+        onRecoveryChanged?(true)
+        defer { onRecoveryChanged?(false) }
         resetSession()
         if gop.last?.data == unit.data, gop.first?.idr == true, replay() {
             let n = gop.count
-            DispatchQueue.main.async { DebugLog.write("decoder: session lost (\(status)); decoded the GOP again (\(n) units)") }
+            let ms = (CFAbsoluteTimeGetCurrent() - recoveryStarted) * 1000
+            DispatchQueue.main.async {
+                DebugLog.write(String(format: "decoder: session lost (%d); decoded the GOP again (%d units, %.0f ms)", status, n, ms))
+            }
             return
         }
         onError?("decode failed \(status)" + (status == kVTInvalidSessionErr ? " (session lost, e.g. in background)" : ""))

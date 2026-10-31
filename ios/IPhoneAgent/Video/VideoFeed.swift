@@ -65,6 +65,9 @@ extension ScreenSource {
     private var clockOffset: Double?  // local s − board s, the smallest seen (≈ the link latency)
     var mirroring = false  // board status says ap == streaming
     @Published private(set) var waitingForKeyframe = false
+    @Published private(set) var decoderRecovering = false
+    private var frameRevision: UInt64 = 0
+    private var recoveryFrameRevision: UInt64 = 0
     var metrics: Metrics?
     weak var device: HIDDevice?
 
@@ -74,6 +77,9 @@ extension ScreenSource {
 
     init() {
         decoder.onFrame = { [weak self] f in DispatchQueue.main.async { self?.publish(f) } }
+        decoder.onRecoveryChanged = { [weak self] recovering in
+            DispatchQueue.main.async { self?.decoderRecoveryChanged(recovering) }
+        }
         decoder.onError = { [weak self] msg in
             DispatchQueue.main.async {
                 let bg = UIApplication.shared.applicationState == .background
@@ -84,7 +90,17 @@ extension ScreenSource {
         }
     }
 
-    var live: Bool { mirroring && !waitingForKeyframe && frame != nil && (device?.connected ?? false) }
+    var live: Bool {
+        mirroring && !waitingForKeyframe && !decoderRecovering && !broken && frame != nil
+            && frameRevision >= recoveryFrameRevision
+            && (device?.connected ?? false)
+    }
+
+    func decoderRecoveryChanged(_ recovering: Bool) {
+        decoderRecovering = recovering
+        if recovering { recoveryFrameRevision = frameRevision + 1 }
+        DebugLog.write("video: decoder recovery " + (recovering ? "started" : "finished"))
+    }
 
     func updateKeyframeStatus(_ waiting: Bool?) {
         guard let waiting else { return }
@@ -147,6 +163,7 @@ extension ScreenSource {
 
     private func publish(_ f: H264Decoder.Frame) {
         guard !waitingForKeyframe else { return }
+        frameRevision += 1
         frame = f.jpeg
         updated = now()
         capturedAt = clockOffset.map { Double(f.unit.boardMs) / 1000 + $0 } ?? updated
@@ -167,15 +184,23 @@ extension ScreenSource {
         return max(8, gopBytes * 8 / 1000 / kbps * 2 + 3)
     }
 
-    /// A current frame for the model. While the board streams, the live stream has it (an IDR comes every
-    /// ~2 s): use a frame younger than `maxAge`, or wait for the next one. Snap only as a fallback, retried
-    /// once with a longer timeout. Returns where the frame came from, for the log.
+    /// The phone can invalidate its decoder on entering background. Replaying a long, locally cached
+    /// GOP then takes several seconds. Never inject a BLE snapshot into an active live decoder:
+    /// the board's replay cache may be empty even though the live dependency chain is intact.
+    /// Explicit snapshot mode retains its own bounded retry path.
     @discardableResult
-    func currentFrame(maxAge: Double = 1, wait: Double = 3) async throws -> String {
+    func currentFrame(maxAge: Double = 1, wait: Double = 3, recoveryWait: Double = 30) async throws -> String {
         if waitingForKeyframe { throw DeviceError(message: "waiting for video keyframe; restart Screen Mirroring") }
-        if streamOn && mirroring {
-            if frame != nil && now() - updated < maxAge { return "live" }
-            if await fresh(since: now() - maxAge, timeout: wait) != nil { return "live (waited)" }
+        if streamOn {
+            let since = now() - maxAge
+            let started = ProcessInfo.processInfo.systemUptime
+            if try await waitForLiveFrame(since: since, timeout: 0) { return "live" }
+            if try await waitForLiveFrame(since: since, timeout: wait) { return "live (waited)" }
+            DebugLog.write(String(format: "video: waiting for live recovery (decoder %@, GOP %d bytes); no snapshot fallback",
+                                  decoderRecovering ? "replaying" : "pending", metrics?.board?.gop ?? -1))
+            let remaining = max(0, recoveryWait - (ProcessInfo.processInfo.systemUptime - started))
+            if try await waitForLiveFrame(since: since, timeout: remaining) { return "live (recovered)" }
+            throw DeviceError(message: "live video did not recover in time; no fresh screen received")
         }
         do {
             try await snap()
@@ -184,6 +209,19 @@ extension ScreenSource {
             try await snap(timeout: snapTimeout * 1.5)
         }
         return "snap"
+    }
+
+    private func waitForLiveFrame(since: Double, timeout: Double) async throws -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + max(0, timeout)
+        while true {
+            try Task.checkCancellation()
+            guard streamOn, mirroring else { throw DeviceError(message: "Screen Mirroring stopped while waiting for video") }
+            guard device?.connected == true else { throw DeviceError(message: "board disconnected while waiting for video") }
+            if waitingForKeyframe { throw DeviceError(message: "waiting for video keyframe; live chain needs resynchronization") }
+            if live, updated >= since, capturedAt == 0 || capturedAt >= since { return true }
+            if ProcessInfo.processInfo.systemUptime >= deadline { return false }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
     }
 
     /// Ask the board for the current GOP and wait until it is decoded. Returns the latency in ms.
@@ -224,9 +262,9 @@ extension ScreenSource {
             } else {
                 await settled()
                 if await newer(than: since, timeout: 1.5) { return }
-                guard broken || !streamOn else { return DebugLog.write("frame: none after the action; screen unchanged") }
-                DebugLog.write("frame: stream stale (waiting for an IDR); snapping")
-                try await snap()
+                guard broken || decoderRecovering || !streamOn else { return DebugLog.write("frame: none after the action; screen unchanged") }
+                DebugLog.write("frame: stream stale; waiting for current video")
+                try await currentFrame()
             }
         } catch {
             DebugLog.write("frame after action failed: \(error.localizedDescription)")

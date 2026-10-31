@@ -62,4 +62,113 @@ final class VideoTests: XCTestCase {
         XCTAssertEqual(units.map { $0.first! & 0x1f }, [7, 8, 5])
         XCTAssertEqual(units[0], Data([0x67, 1, 2]))
     }
+
+    @MainActor func testLiveStartupWaitsForDecoderRecoveryBeyondInitialTimeoutWithoutSnapshot() async throws {
+        let device = FakeDevice()
+        let feed = VideoFeed()
+        feed.device = device
+        feed.mirroring = true
+        try await feed.stream(true)
+        feed.show(Data([1]), width: 480, height: 1040)
+        feed.decoderRecoveryChanged(true)
+        XCTAssertFalse(feed.live)
+        let arrival = Task { @MainActor in
+            try await Task.sleep(nanoseconds: 100_000_000)
+            feed.show(Data([2]), width: 480, height: 1040)
+            feed.decoderRecoveryChanged(false)
+        }
+        let source = try await feed.currentFrame(wait: 0, recoveryWait: 1)
+        try await arrival.value
+        XCTAssertEqual(source, "live (recovered)")
+        XCTAssertEqual(feed.frame, Data([2]))
+        XCTAssertEqual(device.sent, ["stream on"], "recovery must not request the board's possibly empty GOP")
+    }
+
+    @MainActor func testLiveRecoveryWorksWithAnEmptyBoardGOP() async throws {
+        let device = FakeDevice()
+        let feed = VideoFeed()
+        let metrics = Metrics()
+        metrics.board = BoardStatus.decode(Data(#"{"ap":"streaming","gop":0,"gover":2,"gwait":0,"gcfg":1}"#.utf8))
+        feed.metrics = metrics
+        feed.device = device
+        feed.mirroring = true
+        try await feed.stream(true)
+        let arrival = Task { @MainActor in
+            try await Task.sleep(nanoseconds: 80_000_000)
+            feed.show(Data([3]), width: 480, height: 1040)
+        }
+        let source = try await feed.currentFrame(wait: 0, recoveryWait: 1)
+        try await arrival.value
+        XCTAssertEqual(source, "live (recovered)")
+        XCTAssertEqual(device.sent, ["stream on"])
+    }
+
+    @MainActor func testLiveRecoveryTimeoutRejectsOldScreenAndNeverFallsBackToSnapshot() async throws {
+        let device = FakeDevice()
+        let feed = VideoFeed()
+        feed.device = device
+        feed.mirroring = true
+        try await feed.stream(true)
+        feed.show(Data([1]), width: 480, height: 1040)
+        feed.decoderRecoveryChanged(true)
+        feed.decoderRecoveryChanged(false)  // the old image is not a new decoder output
+        do {
+            _ = try await feed.currentFrame(wait: 0.01, recoveryWait: 0.06)
+            XCTFail("expected bounded live timeout")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("live video did not recover"))
+        }
+        XCTAssertEqual(device.sent, ["stream on"])
+    }
+
+    @MainActor func testLiveFrameWaitStopsOnCancellationAndDoesNotSendSnapshot() async throws {
+        let device = FakeDevice()
+        let feed = VideoFeed()
+        feed.device = device
+        feed.mirroring = true
+        try await feed.stream(true)
+        let waiting = Task { try await feed.currentFrame(wait: 2, recoveryWait: 3) }
+        await Task.yield()
+        waiting.cancel()
+        do { _ = try await waiting.value; XCTFail("expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(device.sent, ["stream on"])
+    }
+
+    @MainActor func testLiveFrameWaitStopsWhenMirroringStops() async throws {
+        let device = FakeDevice()
+        let feed = VideoFeed()
+        feed.device = device
+        feed.mirroring = true
+        try await feed.stream(true)
+        feed.mirroring = false
+        do { _ = try await feed.currentFrame(wait: 0.01); XCTFail("expected mirror stopped") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("Screen Mirroring stopped")) }
+        XCTAssertEqual(device.sent, ["stream on"])
+    }
+
+    @MainActor func testExplicitSnapshotModeStillRequestsSnapshot() async throws {
+        let feed = VideoFeed()
+        let device = SnapshotTestDevice { feed.show(Data([4]), width: 480, height: 1040) }
+        feed.device = device
+        feed.mirroring = true
+        let source = try await feed.currentFrame()
+        XCTAssertEqual(source, "snap")
+        XCTAssertEqual(device.sent, ["snap"])
+        XCTAssertEqual(feed.frame, Data([4]))
+    }
+}
+
+@MainActor private final class SnapshotTestDevice: HIDDevice {
+    var links = 1
+    var connected = true
+    var sent: [String] = []
+    let onSnap: () -> Void
+    init(onSnap: @escaping () -> Void) { self.onSnap = onSnap }
+    func send(_ command: String) async throws -> String {
+        sent.append(command)
+        if command == "snap" { onSnap() }
+        return ""
+    }
+    func waitConnected(_ timeout: TimeInterval) async -> Bool { connected }
 }
