@@ -51,6 +51,8 @@ import UIKit
     @Published var takingOver = false
     @Published var departing = false  // the character's take-off before a run
     @Published var startingAgent = false
+    /// Only the post-calibration launch sequence, not time spent manually calibrating.
+    var preparingAgent = false { didSet { updateIdleTimer() } }
     /// A banner on Home: the app could not leave by itself (swipe up), or the run waits while the app is in front.
     @Published var homeHint: String?
     var resumeAsked = 0.0  // when Continue was tapped in the app
@@ -65,6 +67,7 @@ import UIKit
     var lastTask = ""
     var runStarted = Date()
     private var settingsSink: AnyCancellable?
+    private var agentStateSink: AnyCancellable?
     var videoSink: AnyCancellable?
     var videoDir: URL?
     private(set) lazy var calibrator = AutoCalibrator(app: self)
@@ -148,6 +151,7 @@ import UIKit
         agent.onFinish = { [weak self] in self?.agentFinished() }
         agent.onStep = { [weak self] in self?.stepped() }
         agent.onDoing = { [weak self] d in self?.doing(d) }
+        agentStateSink = agent.$running.sink { [weak self] running in self?.updateIdleTimer(running: running) }
         agent.onHelp = { [weak self] reason in await self?.needsHelp(reason) ?? .stop }
         agent.gate = { [weak self] in try await self?.holdWhileInFront() }
         AgentControl.handle = { [weak self] command in await self?.control(command) }
@@ -156,8 +160,10 @@ import UIKit
         wireRecovery()
 
         timers.append(Task { [weak self] in
-            await self?.board.commands.keepAwake(screenLive: { self?.feed.live ?? false },
-                                                 taskActive: { self?.agent.running ?? false })
+            // Decoder recovery is not screen-off: keep an active mirrored task awake while waiting for video.
+            await self?.board.commands.keepAwake(screenLive: {
+                self?.feed.mirroring == true && UIApplication.shared.isProtectedDataAvailable
+            }, taskActive: { self?.preparingAgent == true || self?.agent.running == true })
         })
         timers.append(Task { [weak self] in
             while !Task.isCancelled {
@@ -167,14 +173,22 @@ import UIKit
         })
         let center = NotificationCenter.default
         center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.metrics.enteredBackground(); DebugLog.write("app: background") }
+            MainActor.assumeIsolated {
+                self?.metrics.enteredBackground()
+                self?.updateIdleTimer()
+                DebugLog.write("app: background")
+            }
         }
         center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.metrics.enteredForeground()
+                self?.updateIdleTimer()
                 self?.wifi.wake()
                 DebugLog.write("app: foreground")
             }
+        }
+        center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateIdleTimer() }
         }
         if MockMode.on { startMock() }
         runs.reload()
@@ -199,11 +213,20 @@ import UIKit
         }
     }
 
+    /// This flag only covers our foreground UI. HID pulses cover work in other apps.
+    private func updateIdleTimer(running: Bool? = nil) {
+        UIApplication.shared.isIdleTimerDisabled = UIApplication.shared.applicationState == .active
+            && (preparingAgent || (running ?? agent.running))
+    }
+
     /// Every second: metrics; a suspension note; the stream's numbers every 10 s while a run goes.
     private func tick() {
         let before = metrics.suspensions, gap = now() - lastTick
         metrics.tick()
         lastTick = now()
+        if (preparingAgent || agent.running) && gap > 5 {
+            DebugLog.write(String(format: "keep-awake: app scheduling gap %.1f s", gap))
+        }
         publishWidget()
         if metrics.suspensions > before { DebugLog.write(String(format: "app: resumed after %.0f s suspended", gap)) }
         if agent.running, now() - lastStreamLog >= 10 {

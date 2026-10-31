@@ -7,13 +7,15 @@ import XCTest
     var lines: [String] = []
     var drops = 0
     var silent = false
+    var failingCommands: Set<String> = []
     weak var channel: CommandChannel?
 
     func write(_ line: String) throws {
         lines.append(line)
         guard !silent else { return }
         let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
-        let reply = parts[1] == "bad" ? "\(parts[0]) err unknown command" : "\(parts[0]) ok"
+        let reply = parts[1] == "bad" || failingCommands.contains(parts[1])
+            ? "\(parts[0]) err unknown command" : "\(parts[0]) ok"
         Task { @MainActor in self.channel?.handleReply(reply) }
     }
 
@@ -67,6 +69,106 @@ import XCTest
         async let b: String = channel.send("move -1 0")
         _ = try await (a, b)
         XCTAssertEqual(board.lines.count, 2)
+    }
+
+    func testVideoAndConfigurationTrafficDoesNotPostponeKeepAwake() async throws {
+        var time = 0.0
+        let board = FakeBoard()
+        let channel = CommandChannel(transport: board, clock: { time })
+        board.channel = channel
+        channel.linkUp()
+        for (i, command) in ["stream on", "snap", "res 480 1040", "ping"].enumerated() {
+            time = Double(i + 1) * 2.5
+            try await channel.send(command)
+        }
+        // A reply just arrived: the heartbeat is fresh but the phone has had no input for 10 s.
+        try await channel.keepAwakeTick(screenLive: { true }, taskActive: { true })
+        XCTAssertEqual(board.lines.suffix(2).map { $0.split(separator: " ", maxSplits: 1)[1] },
+                       ["move 1 0", "move -1 0"])
+    }
+
+    func testSuccessfulInputPostponesKeepAwakeButFailedInputDoesNot() async throws {
+        var time = 0.0
+        let board = FakeBoard()
+        let channel = CommandChannel(transport: board, clock: { time })
+        board.channel = channel
+        channel.linkUp()
+        time = 9
+        try await channel.send("click")
+        time = 10
+        try await channel.keepAwakeTick(screenLive: { true }, taskActive: { true })
+        XCTAssertEqual(board.lines.count, 1)
+        time = 19
+        board.failingCommands = ["key a"]
+        do { try await channel.send("key a"); XCTFail("expected board error") } catch {}
+        try await channel.keepAwakeTick(screenLive: { true }, taskActive: { true })
+        XCTAssertTrue(board.lines.last?.hasSuffix("move -1 0") == true)
+    }
+
+    func testKeepAwakeSkipsIdleDisconnectedAndUnmirroredPhones() async throws {
+        var time = 0.0
+        let board = FakeBoard()
+        let channel = CommandChannel(transport: board, clock: { time })
+        board.channel = channel
+        channel.linkUp()
+        time = 20
+        try await channel.keepAwakeTick(screenLive: { true }, taskActive: { false })
+        time = 40
+        try await channel.keepAwakeTick(screenLive: { false }, taskActive: { true })
+        time = 60
+        board.isConnected = false
+        try await channel.keepAwakeTick(screenLive: { true }, taskActive: { true })
+        XCTAssertEqual(board.lines.map { $0.split(separator: " ")[1] }, ["ping", "ping"])
+    }
+
+    func testKeepAwakeDoesNotMoveWhileMouseButtonIsHeld() async throws {
+        var time = 0.0
+        let board = FakeBoard()
+        let channel = CommandChannel(transport: board, clock: { time })
+        board.channel = channel
+        channel.linkUp()
+        try await channel.send("press")
+        time = 20
+        try await channel.keepAwakeTick(screenLive: { true }, taskActive: { true })
+        XCTAssertEqual(board.lines.map { $0.split(separator: " ")[1] }, ["press", "ping"])
+    }
+
+    func testKeepAwakePulseCannotBeSplitByAnInputCommand() async throws {
+        var time = 0.0
+        let board = FakeBoard()
+        let channel = CommandChannel(transport: board, clock: { time })
+        board.channel = channel
+        channel.linkUp()
+        time = 20
+        let pulse = Task { try await channel.keepAwakeTick(screenLive: { true }, taskActive: { true }) }
+        while board.lines.isEmpty { await Task.yield() }
+        async let click: String = channel.send("click")
+        try await pulse.value
+        _ = try await click
+        XCTAssertEqual(board.lines.map { $0.split(separator: " ", maxSplits: 1)[1] },
+                       ["move 1 0", "move -1 0", "click"])
+    }
+
+    func testQueuedKeepAwakeRechecksWhetherTaskHasStopped() async throws {
+        var time = 0.0
+        var active = true
+        let board = FakeBoard()
+        let channel = CommandChannel(transport: board, clock: { time })
+        board.channel = channel
+        channel.linkUp()
+        time = 20
+        board.silent = true
+        let snapshot = Task { try await channel.send("snap") }
+        while board.lines.isEmpty { await Task.yield() }
+        let pulse = Task { try await channel.keepAwakeTick(screenLive: { true }, taskActive: { active }) }
+        await Task.yield()
+        active = false
+        board.silent = false
+        let id = board.lines[0].split(separator: " ")[0]
+        channel.handleReply("\(id) ok")
+        _ = try await snapshot.value
+        try await pulse.value
+        XCTAssertEqual(board.lines.count, 1, "a stopped task must not leave a queued pointer pulse")
     }
 
     func testLinkDownFailsCommandsInFlight() async {

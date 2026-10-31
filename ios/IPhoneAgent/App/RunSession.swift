@@ -42,6 +42,8 @@ extension AppModel {
             say("LLM: \(error.localizedDescription)")
             return
         }
+        preparingAgent = true
+        defer { preparingAgent = false }
         // Start is tapped in this app, so: Live Activity, go Home, let the screen settle, THEN the first
         // frame for the planner. Each sub-step is timed in the log.
         let t0 = now()

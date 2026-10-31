@@ -64,21 +64,28 @@ extension BoardTransport {
     /// "app <command>" lines relayed from the Mac harness.
     var onAppCommand: ((String) -> Void)?
     private var pending: [Int: CheckedContinuation<BoardReply, Error>] = [:]
-    private var last = 0.0, beat = 0.0
+    private var lastInput = 0.0, beat = 0.0
+    private var mouseHeld = false
+    private let clock: () -> Double
     var onTiming: ((String, Double) -> Void)?  // command name, ms
 
-    init(transport: BoardTransport? = nil) { self.transport = transport }
+    init(transport: BoardTransport? = nil, clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) {
+        self.transport = transport
+        self.clock = clock
+    }
 
     var connected: Bool { transport?.isConnected ?? false }
 
     /// The transport (re)connected and subscribed.
     func linkUp() {
         links += 1
-        last = now(); beat = last  // fresh link: nothing to keep awake yet
+        lastInput = clock(); beat = lastInput
+        mouseHeld = false
     }
 
     /// The link dropped: fail everything in flight.
     func linkDown() {
+        mouseHeld = false
         let waiting = pending
         pending = [:]
         waiting.values.forEach { $0.resume(throwing: DeviceError(message: "board disconnected")) }
@@ -143,18 +150,27 @@ extension BoardTransport {
     }
 
     private func sendAttempt(_ command: String, timeout custom: Double?, id: Int) async throws -> String {
+        await lock.lock()
+        defer { lock.unlock() }
+        return try await sendLocked(command, timeout: custom, id: id)
+    }
+
+    /// Caller holds the command lock, including both halves of an idle pointer pulse.
+    private func sendLocked(_ command: String, timeout custom: Double?, id: Int) async throws -> String {
         guard connected, let transport else { throw DeviceError(message: "board not connected") }
         let timeout = custom ?? Self.timeout(command)
         let name = String(command.split(separator: " ").first ?? "")
-        await lock.lock()
-        defer { lock.unlock() }
-        let started = now()
+        let started = clock()
         let reply: BoardReply
         do {
             reply = try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (c: CheckedContinuation<BoardReply, Error>) in
                     pending[id] = c
-                    do { try transport.write("\(id) \(command)") } catch {
+                    do {
+                        try transport.write("\(id) \(command)")
+                        // A lost press reply may still mean the button is held. Wait for a release.
+                        if name == "press" { mouseHeld = true }
+                    } catch {
                         pending[id] = nil
                         c.resume(throwing: error)
                         return
@@ -170,7 +186,7 @@ extension BoardTransport {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            let ms = (now() - started) * 1000
+            let ms = (clock() - started) * 1000
             if (error as? DeviceError)?.message == "timeout" {
                 if name != "ping" { DebugLog.write(String(format: "cmd #%d %@ → timeout after %.0f ms", id, String(command.prefix(40)), ms)) }
                 throw BoardTimeout(command: String(command.prefix(30)), seconds: timeout)
@@ -179,17 +195,22 @@ extension BoardTransport {
                                   error.localizedDescription))
             throw DeviceError(message: "board link lost during '\(command.prefix(30))': \(error.localizedDescription)")
         }
-        beat = now()  // last reply of any kind
+        beat = clock()  // transport activity is not necessarily phone input
         if command != "ping" {
-            last = beat  // last real command: the phone's idle time
-            onTiming?(String(command.split(separator: " ").first ?? ""), (now() - started) * 1000)
+            onTiming?(name, (clock() - started) * 1000)
         }
         if name != "ping" {
             DebugLog.write(String(format: "cmd #%d %@ → %@ %@ (%.0f ms)", id, String(command.prefix(40)),
-                                  reply.ok ? "ok" : "err", String(reply.text.prefix(60)), (now() - started) * 1000))
+                                  reply.ok ? "ok" : "err", String(reply.text.prefix(60)), (clock() - started) * 1000))
         }
         guard reply.ok else { throw DeviceError(message: "err " + reply.text) }
+        if Self.isPhoneInput(name) { lastInput = beat }
+        if name == "release" || name == "click" { mouseHeld = false }
         return reply.text
+    }
+
+    private static func isPhoneInput(_ name: String) -> Bool {
+        ["home", "homescreen", "move", "press", "release", "click", "scroll", "type", "key"].contains(name)
     }
 
     /// Send a debug-log line to the Mac harness through the board (`log <text>`): fire-and-forget, at most
@@ -213,25 +234,41 @@ extension BoardTransport {
         pending.removeValue(forKey: id)?.resume(throwing: error)
     }
 
-    /// While idle: ping every few seconds, so a board that went away shows as gone within seconds, and nudge
-    /// the pointer now and then so the phone does not auto-lock. Runs until cancelled.
-    func keepAwake(idle: Double = 25, heartbeat: Double = 2, screenLive: @escaping () -> Bool,
+    /// Poll independently of reply traffic. Non-input commands (snap, stream, configuration) must not
+    /// postpone phone input; 10 s leaves headroom before a 30 s auto-lock, even during slow model calls.
+    func keepAwake(idle: Double = 10, heartbeat: Double = 2, screenLive: @escaping () -> Bool,
                    taskActive: @escaping () -> Bool) async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: UInt64(heartbeat * 1e9))
-            if !connected || now() - beat < heartbeat { continue }
             do {
-                // nudge only a phone that is awake and mirroring: there is nothing to keep awake otherwise
-                if now() - last > idle && screenLive() && taskActive() {
-                    DebugLog.write("keep-awake: task active, nudging pointer")
-                    try await send("move 1 0")
-                    try await send("move -1 0")
-                } else {
-                    try await send("ping")
-                }
+                try await Task.sleep(nanoseconds: UInt64(heartbeat * 1e9))
+                try await keepAwakeTick(idle: idle, heartbeat: heartbeat, screenLive: screenLive, taskActive: taskActive)
+            } catch is CancellationError {
+                return
             } catch {
-                log("board gone: \(error.localizedDescription)")
+                DebugLog.write("keep-awake: \(error.localizedDescription)")
             }
+        }
+    }
+
+    /// Recheck after waiting for in-flight commands: a task may have stopped while we were queued.
+    /// A pulse holds the FIFO lock for both moves, so it never straddles a tap/drag command.
+    func keepAwakeTick(idle: Double = 10, heartbeat: Double = 2, screenLive: () -> Bool,
+                       taskActive: () -> Bool) async throws {
+        await lock.lock()
+        defer { lock.unlock() }
+        try Task.checkCancellation()
+        guard connected else { return }
+        func sendIdle(_ command: String) async throws {
+            let id = nextID
+            nextID += 1
+            _ = try await sendLocked(command, timeout: nil, id: id)
+        }
+        if taskActive() && screenLive() && !mouseHeld && clock() - lastInput >= idle {
+            DebugLog.write(String(format: "keep-awake: active task, input idle %.1f s; pointer pulse", clock() - lastInput))
+            try await sendIdle("move 1 0")
+            try await sendIdle("move -1 0")
+        } else if clock() - beat >= heartbeat {
+            try await sendIdle("ping")
         }
     }
 
